@@ -1,0 +1,27 @@
+
+.clone-stream{pointer-events:none}
+
+
+
+.cdlg{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:clamp(12px,5vw,80px);
+  background:rgba(20,2,6,.12);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);opacity:0;visibility:hidden;transition:opacity .3s ease,visibility 0s linear .3s}
+.cdlg.is-open{opacity:1;visibility:visible;transition:opacity .3s ease}
+.cdlg__win{position:relative;width:100%;max-width:80rem;background:#fff;border:1px solid #140206;padding:4px;transform:scale(.96) translateY(8px);transition:transform .35s cubic-bezier(.2,.8,.2,1)}
+.cdlg.is-open .cdlg__win{transform:none}
+.cdlg__bar{display:flex;align-items:center;gap:12px;height:30px;padding:0 4px;font:400 14px/1 "Fusion Pixel",system-ui,sans-serif;letter-spacing:.02em;text-transform:uppercase;color:#140206}
+.cdlg__lines{flex:1;height:12px;background:repeating-linear-gradient(#140206 0 1px,transparent 1px 3px)}
+.cdlg__x{width:22px;height:22px;border:0;background:none;cursor:pointer;padding:0;color:#140206;font:20px/1 system-ui}
+.cdlg__stage{position:relative;aspect-ratio:16/8.3;background:#000;overflow:hidden}
+.cdlg__stage video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:brightness(.55)}
+.cdlg__msg{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;text-align:center;color:#fff;padding:24px}
+.cdlg__msg h3{margin:0;font:400 clamp(26px,3.2vw,40px)/1.05 "Dunang Serif",Georgia,serif;letter-spacing:-.02em}
+.cdlg__msg p{margin:0;font:400 18px/1.4 system-ui,sans-serif;opacity:.92}
+.cdlg__dots::after{content:"";animation:cdlgDots 1.2s steps(4) infinite}
+@keyframes cdlgDots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
+.cdlg__btns{display:flex;gap:10px}
+.cdlg__btn{border:0;cursor:pointer;background:#ff5a85;color:#140206;padding:14px 24px;font:400 16px/1 "Fusion Pixel",system-ui;text-transform:uppercase}
+.cdlg__btn.is-ghost{background:#fff}
+.cdlg__ctrl{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;gap:8px}
+.cdlg__ctrl span{width:44px;height:44px;display:grid;place-items:center;background:rgba(255,255,255,.14);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+.cdlg__ctrl img{width:20px;height:20px;filter:invert(1)}
+@media (prefers-reduced-motion:reduce){.cdlg,.cdlg__win{transition:none}}

@@ -1,0 +1,18 @@
+{
+  "name": "teaching-avatar-mvp",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Mori Classroom · 经管课程数字人教学 MVP（出口报价与交易磋商）",
+  "engines": { "node": ">=20.19" },
+  "workspaces": ["apps/web", "apps/api"],
+  "scripts": {
+    "dev": "npm run dev -w @human/web",
+    "dev:api": "npm run dev -w @human/api",
+    "build": "npm run build -w @human/api && npm run build -w @human/web",
+    "typecheck": "npm run typecheck -w @human/api && npm run typecheck -w @human/web",
+    "test": "npm run test -w @human/api",
+    "start": "npm run start -w @human/api",
+    "check:bundle": "node tools/scripts/check-bundle-secrets.mjs"
+  },
+  "overrides": { "typescript": "~5.9.3" }
+}

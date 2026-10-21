@@ -1,0 +1,122 @@
+{
+  "schemaVersion": "1.0",
+  "courseId": "trade-quote-unit-v1",
+  "version": "2026-10-17-draft-1",
+  "name": "国际贸易实务相关课堂样例",
+  "unit": "出口报价与交易磋商",
+  "audience": "已学过基础概念的经管本科生，需教师确认",
+  "reviewStatus": "unreviewed",
+  "provenance": "本任务包自拟的虚构教学案例；未获教师审核，不代表真实交易、政策或行业惯例",
+  "storageNotice": "本文件含 serverOnly。只能放服务端内容目录，不可直接放静态 public、打包入前端或原样由公开 API 返回。",
+  "learningGoals": [
+    "用给定售价、成本和数量计算课堂口径的毛利与毛利率",
+    "检查价格、首付款与交期是否满足案例条件",
+    "解释报价取舍并根据对话反馈改进方案"
+  ],
+  "rubricVersion": "draft-evidence-1",
+  "facts": [
+    {
+      "id": "F-QUOTE-01",
+      "title": "本案例的报价计算口径",
+      "text": "本练习将单位成本 c 视作给定的全部计入成本，不另计运费、税费、汇率或融资成本。单价 p、数量 q 时，销售收入为 p×q，毛利为 (p-c)×q，毛利率为 (p-c)/p；成本加成率为 (p-c)/c，两者分母不同。这里的简化口径只用于本课堂练习。",
+      "sourceType": "虚构课堂规则",
+      "sourcePath": "fixtures/course-fixture.json",
+      "locator": "facts[id=F-QUOTE-01].text",
+      "reviewStatus": "unreviewed"
+    },
+    {
+      "id": "F-TERMS-02",
+      "title": "最终方案应包含完整条件",
+      "text": "本案例最终方案必须明确每件美元价格、数量、首付款比例和交付天数。卖方单价至少 12.00 美元，数量固定 500 件，首付款不少于 30%，交付天数须为 18 至 21 天的整数，均包含边界。只报价格不能完成条件检查。这些是本虚构案例的规则。",
+      "sourceType": "虚构课堂规则",
+      "sourcePath": "fixtures/course-fixture.json",
+      "locator": "facts[id=F-TERMS-02].text",
+      "reviewStatus": "unreviewed"
+    },
+    {
+      "id": "F-TALK-03",
+      "title": "练习中如何解释与回应",
+      "text": "本单元观察三项行为：是否用案例数据解释报价依据；是否回应买家提出的具体顾虑；是否明确最终交易条件。意见应指向实际对话原句，缺少相关话语时记为未观察到。符合交易条件与表达清楚是两件事，要分别反馈。",
+      "sourceType": "虚构课堂规则",
+      "sourcePath": "fixtures/course-fixture.json",
+      "locator": "facts[id=F-TALK-03].text",
+      "reviewStatus": "unreviewed"
+    }
+  ],
+  "cases": [
+    {
+      "id": "C-EXPORT-01",
+      "title": "500 件教学样品的出口报价磋商",
+      "studentVisible": {
+        "isFictional": true,
+        "currency": "USD",
+        "product": "无品牌教学样品",
+        "unitCostCents": 1000,
+        "quantity": 500,
+        "sellerMinimumUnitPriceCents": 1200,
+        "sellerDesiredUnitPriceCents": 1350,
+        "minimumDepositBasisPoints": 3000,
+        "minimumLeadDays": 18,
+        "maximumLeadDays": 21,
+        "openingBuyerMessage": "我们需要 500 件样品，希望价格有竞争力，也关心首付款和交货时间。请给出你的初步方案。",
+        "task": "与模拟买家沟通后提交完整最终方案。服务端会分别检查卖方条件、买方条件和表达依据；聊天中说成交不代表规则已通过。",
+        "suggestedDialogueRounds": {"minimum": 4, "maximum": 6},
+        "factIds": ["F-QUOTE-01", "F-TERMS-02", "F-TALK-03"]
+      },
+      "serverOnly": {
+        "buyerMaximumUnitPriceCents": 1280,
+        "buyerMaximumDepositBasisPoints": 3000,
+        "buyerMaximumLeadDays": 21,
+        "buyerRequiredQuantity": 500,
+        "rolePolicy": "买家可表示价格、首付款或交期不满足条件并要求调整，不逐字透露隐藏阈值，不替学生写最优方案。协议通过与否由规则引擎决定，不采信模型的成交声明。",
+        "executionPolicy": "隐藏阈值仅由代码比较。买家语言模型只接收当前方案的粗粒度可接受/需调整标签与对话，不直接接收阈值数值；最终报告可披露本模拟案例的规则核算。",
+        "exampleFinalOffer": {
+          "unitPriceCents": 1250,
+          "quantity": 500,
+          "depositBasisPoints": 3000,
+          "leadDays": 20
+        },
+        "expectedExampleResult": {
+          "revenueCents": 625000,
+          "costCents": 500000,
+          "grossProfitCents": 125000,
+          "grossMargin": 0.2,
+          "costMarkup": 0.25,
+          "sellerConditionsPass": true,
+          "buyerConditionsPass": true
+        },
+        "testCases": [
+          {"id": "R1", "offer": {"unitPriceCents": 1250, "quantity": 500, "depositBasisPoints": 3000, "leadDays": 20}, "expect": {"valid": true, "sellerPass": true, "buyerPass": true, "grossProfitCents": 125000}},
+          {"id": "R2", "offer": {"unitPriceCents": 1280, "quantity": 500, "depositBasisPoints": 3000, "leadDays": 18}, "expect": {"valid": true, "sellerPass": true, "buyerPass": true, "grossProfitCents": 140000}},
+          {"id": "R3", "offer": {"unitPriceCents": 1150, "quantity": 500, "depositBasisPoints": 2000, "leadDays": 20}, "expect": {"valid": true, "sellerPass": false, "buyerPass": true, "grossProfitCents": 75000}},
+          {"id": "R4", "offer": {"unitPriceCents": 1300, "quantity": 500, "depositBasisPoints": 4000, "leadDays": 22}, "expect": {"valid": true, "sellerPass": false, "buyerPass": false, "grossProfitCents": 150000}},
+          {"id": "R5", "offer": {"unitPriceCents": 0, "quantity": 500, "depositBasisPoints": 3000, "leadDays": 20}, "expect": {"valid": false, "error": "INVALID_PRICE", "grossMargin": null}}
+        ]
+      }
+    }
+  ],
+  "objectiveRules": {
+    "moneyStorage": "integer cents",
+    "depositStorage": "integer basis points: 3000 means 30 percent",
+    "inputValidation": "价格和数量为正整数；比例为 0 至 10000 的整数；交付天数为正整数；字段缺失拒绝计算。输入格式有效不代表满足案例商业条件。",
+    "sellerCondition": "price >= sellerMinimum AND quantity == fixedQuantity AND deposit >= minimumDeposit AND minimumLeadDays <= leadDays <= maximumLeadDays",
+    "buyerCondition": "price <= buyerMaximum AND quantity == buyerRequiredQuantity AND deposit <= buyerMaximumDeposit AND leadDays <= buyerMaximumLeadDays",
+    "agreementCondition": "valid AND sellerConditionsPass AND buyerConditionsPass",
+    "grossMarginFormula": "(unitPriceCents - unitCostCents) / unitPriceCents",
+    "displayRounding": "金额展示两位小数，百分比展示两位小数；计算使用未舍入值",
+    "numericComparisonTolerance": 0.000000001
+  },
+  "feedbackDimensions": [
+    {"id": "D1", "name": "解释报价依据", "requiredEvidence": "turnId 和学生实际原话"},
+    {"id": "D2", "name": "回应具体顾虑", "requiredEvidence": "买方顾虑与学生回应的 turnId 对"},
+    {"id": "D3", "name": "明确交易条件", "requiredEvidence": "实际原话与最终方案字段，不凭模型补全"}
+  ],
+  "retryTemplate": {
+    "type": "gross-margin-vs-markup",
+    "serverOnlyAnswerPolicy": "参数与答案在服务端生成并保留，提交前只发送题干。标准答案不得经题目接口提前下发。",
+    "unitCostCentsCandidates": [800, 1000, 1200],
+    "priceMultiplierCandidates": [1.25, 1.5],
+    "quantityCandidates": [200, 400, 500],
+    "question": "根据给定成本、售价和数量，分别计算毛利与毛利率，并说明毛利率和成本加成率的区别。"
+  }
+}

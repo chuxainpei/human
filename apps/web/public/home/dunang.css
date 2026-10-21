@@ -1,0 +1,105 @@
+/* dunang.css — 嘟囔首页：字体（站内子集）、课程事实条、构成区主视频、“和陈老师面对面”弹窗。 */
+@font-face { font-family: "Fusion Pixel"; src: url("/human/home/fonts/fusion-pixel-home.woff2") format("woff2"); font-display: swap; }
+@font-face { font-family: "Dunang Serif"; src: url("/human/home/fonts/noto-serif-sc-home.woff2") format("woff2"); font-display: swap; }
+
+/* CJK 不随意断行时也不能把容器撑宽 */
+html, body { overflow-x: clip; }
+body { -webkit-font-smoothing: antialiased; }
+/* 段尾不留单字：浏览器优化最后几行的断行 */
+body { text-wrap: pretty; }
+.dn-nobr { white-space: nowrap; }
+h1, h2, h3, p { overflow-wrap: anywhere; word-break: normal; line-break: strict; }
+h1 em, h2 em, h3 em { font-style: normal; }
+
+/* 导航右侧按钮：中文不竖排 */
+.navbar_menu-buttons .new-navbar-link, .new-navbar-link, .dropdown-text { white-space: nowrap; }
+
+/* ---- 02 课程事实条：替代 logo 墙，每格一个数字 + 一行字 ---- */
+.dn-fact { display: flex; flex-direction: row; align-items: baseline; justify-content: center; gap: 6px; text-align: left; color: #140206; white-space: nowrap; }
+.dn-fact b { font: 400 2rem/1 "Dunang Serif", "Noto Serif SC", Georgia, serif; letter-spacing: -.02em; }
+.dn-fact span { font: 400 1rem/1.2 "Fusion Pixel", ui-monospace, monospace; }
+.static_logo-img-wrap:has(.dn-fact) { max-width: none; }
+@media (max-width: 991px) {
+  .dn-fact { flex-direction: column; align-items: center; gap: 2px; text-align: center; }
+  .dn-fact b { font-size: 1.5rem; }
+  .dn-fact span { font-size: .75rem; }
+}
+
+/* ---- 04 构成区：主画面是陈老师的循环视频（原为一张静态图） ---- */
+.hv2-anat_stage { isolation: isolate; }
+.hv2-anat_stage > .dn-anat-main { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; z-index: 0; image-rendering: auto; }
+.hv2-anat_stage .understand-video-two-wrap { z-index: 2; }
+
+/* ---- 手机：中文标题字号收一档，避免一个字单独成行 ---- */
+@media (max-width: 767px) {
+  .hv2-ucf_head h2 br, .models-title-content-new h2 br { display: none; }
+}
+@media (max-width: 479px) {
+  .hv2-anat_head h2, .en-section-head h2, .hv2-pals_head h2, .hv2-ucf_head h2, .models-title-content-new h2,
+  .split-section-1 h2, .cta-one-title h2 { font-size: 2rem; line-height: 1.18; }
+  .static_logo-title-text { font-size: 1.05rem; }
+}
+
+/* ---- 和陈老师面对面：复古弹窗 ---- */
+html.dn-call-lock { overflow: hidden; }
+.dn-call { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(20, 2, 6, .55); opacity: 0; visibility: hidden; transition: opacity .3s ease, visibility 0s linear .3s; }
+.dn-call.is-open { opacity: 1; visibility: visible; transition: opacity .3s ease; }
+.dn-call__win { position: relative; width: 100%; max-width: 46rem; background: #fff; border: 1px solid #140206; padding: 4px; box-shadow: 8px 10px 0 #140206; transform: translateY(60px) scale(.9); transition: transform .45s cubic-bezier(.2, .8, .2, 1); }
+.dn-call.is-open .dn-call__win { transform: none; }
+.dn-call__bar { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 4px; color: #140206; font: 400 15px/1 "Fusion Pixel", ui-monospace, monospace; }
+.dn-call__lines { flex: 1; height: 12px; background: repeating-linear-gradient(#140206 0 1px, transparent 1px 3px); }
+.dn-call__title { white-space: nowrap; }
+.dn-call__x, .dn-call__min { width: 22px; height: 22px; padding: 0; border: 1px solid #140206; background: #fff; color: #140206; cursor: pointer; font: 14px/1 system-ui, sans-serif; display: grid; place-items: center; }
+.dn-call__x:hover, .dn-call__min:hover { background: #ff6183; }
+.dn-call__stage { position: relative; aspect-ratio: 16 / 10; background: #140206; overflow: hidden; border: 1px solid #140206; }
+.dn-call__stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.dn-call__badge { position: absolute; left: 12px; top: 12px; display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: rgba(255, 255, 255, .92); border: 1px solid #140206; color: #140206; font: 400 14px/1 "Fusion Pixel", ui-monospace, monospace; }
+.dn-call__badge i { width: 8px; height: 8px; background: #ffb800; }
+.dn-call.is-live .dn-call__badge i { background: #38f261; animation: dnBlink 1s steps(2) infinite; }
+.dn-call__dots::after { content: ""; animation: dnDots 1.2s steps(4) infinite; }
+.dn-call__ctrl { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 8px; }
+.dn-call__ctrl button { width: 40px; height: 40px; border: 1px solid #140206; background: #fff; cursor: pointer; color: #140206; display: grid; place-items: center; padding: 0; }
+.dn-call__ctrl button:hover { background: #ffe3ea; }
+.dn-call__foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 10px 10px; }
+.dn-call__sub { margin: 0; color: #28292a; font-size: 15px; line-height: 1.5; max-width: 26rem; }
+.dn-call__btns { display: flex; gap: 8px; flex-shrink: 0; }
+.dn-call__btn { display: inline-flex; align-items: center; justify-content: center; height: 46px; padding: 0 20px; border: 1px solid #140206; background: #ff6183; color: #140206; cursor: pointer; text-decoration: none; font: 400 16px/1 "Fusion Pixel", ui-monospace, monospace; box-shadow: 3px 4px 0 #140206; transition: transform .15s ease, box-shadow .15s ease; white-space: nowrap; }
+.dn-call__btn:hover { transform: translate(-2px, -2px); box-shadow: 5px 6px 0 #140206; }
+.dn-call__btn.is-ghost { background: #fff; }
+.dn-call.is-min { align-items: flex-end; justify-content: flex-end; background: transparent; pointer-events: none; }
+.dn-call.is-min .dn-call__win { max-width: 20rem; pointer-events: auto; }
+.dn-call.is-min .dn-call__foot { display: none; }
+html.dn-call-lock:has(.dn-call.is-min) { overflow: auto; }
+@keyframes dnDots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75%, 100% { content: "..."; } }
+@keyframes dnBlink { 50% { opacity: .2; } }
+@media (max-width: 600px) {
+  .dn-call { padding: 12px; }
+  .dn-call__win { box-shadow: 5px 6px 0 #140206; }
+  .dn-call__stage { aspect-ratio: 4 / 5; }
+  .dn-call__foot { flex-direction: column; align-items: stretch; }
+  .dn-call__btns { width: 100%; }
+  .dn-call__btn { flex: 1; padding: 0 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .dn-call, .dn-call__win { transition: none; } }
+
+/* ---- 09 理念区：复古窗口循环播放陈老师课堂视频（替代粉色半调大头照） ---- */
+.split-section-1_bg-wrap.dn-vision { display: flex; align-items: center; justify-content: center; padding: clamp(24px, 5vw, 72px); background: #f7f4ef url("/human/home/img/hero-bg.png") center / cover no-repeat; }
+.dn-vwin { width: 100%; max-width: 34rem; background: #fff; border: 1px solid #140206; padding: 4px; box-shadow: 8px 10px 0 #140206; }
+.dn-vwin__bar { display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 4px; color: #140206; font: 400 14px/1 "Fusion Pixel", ui-monospace, monospace; }
+.dn-vwin__sq { width: 10px; height: 10px; background: #ff5a85; flex: none; }
+.dn-vwin__title { white-space: nowrap; }
+.dn-vwin__lines { flex: 1; height: 11px; background: repeating-linear-gradient(#140206 0 1px, transparent 1px 3px); }
+.dn-vwin__min { width: 20px; height: 20px; padding: 0; border: 1px solid #140206; background: #fff; display: grid; place-items: center; cursor: pointer; flex: none; }
+.dn-vwin__min svg { width: 10px; height: 10px; stroke: #140206; stroke-width: 1.4; fill: none; }
+.dn-vwin__min:hover { background: #ffe3ea; }
+.dn-vwin__stage { position: relative; aspect-ratio: 16 / 10; overflow: hidden; border: 1px solid #140206; background: #2a2420; }
+.dn-vwin__stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; filter: none; image-rendering: auto; }
+.dn-vwin__live { position: absolute; left: 10px; top: 10px; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; background: #fff; border: 1px solid #140206; color: #140206; font: 400 13px/1 "Fusion Pixel", ui-monospace, monospace; }
+.dn-vwin__live i { width: 8px; height: 8px; background: #0cb531; animation: dnBlink 1s steps(2) infinite; }
+.dn-vwin__foot { display: flex; justify-content: space-between; gap: 12px; padding: 8px 6px 4px; color: #484748; font: 400 13px/1.2 "Fusion Pixel", ui-monospace, monospace; }
+.dn-vwin.is-min .dn-vwin__stage, .dn-vwin.is-min .dn-vwin__foot { display: none; }
+@media (max-width: 767px) {
+  .split-section-1_bg-wrap.dn-vision { padding: 28px 16px 36px; }
+  .dn-vwin { box-shadow: 5px 6px 0 #140206; }
+  .dn-vwin__foot span:last-child { display: none; }
+}

@@ -1,0 +1,23 @@
+[Unit]
+Description=Mori Classroom (human) API + SPA
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=human
+Group=human
+WorkingDirectory=/var/www/human/current
+EnvironmentFile=/etc/human/human.env
+ExecStart=/usr/bin/node /var/www/human/current/apps/api/dist/server.js
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/tmp
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target

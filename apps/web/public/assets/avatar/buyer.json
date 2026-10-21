@@ -1,0 +1,28 @@
+{
+ "image": "buyer.jpg",
+ "aspect": 1.7916666666666667,
+ "mouth": {
+  "src": "buyer-mouth.png",
+  "left": 32.631,
+  "top": 37.5,
+  "width": 31.395,
+  "height": 23.177,
+  "alignMse": 84.7,
+  "shift": [
+   2,
+   -2
+  ]
+ },
+ "eyes": {
+  "src": "buyer-eyes.png",
+  "left": 42.369,
+  "top": 29.167,
+  "width": 15.698,
+  "height": 9.115,
+  "alignMse": 100.8,
+  "shift": [
+   0,
+   0
+  ]
+ }
+}
