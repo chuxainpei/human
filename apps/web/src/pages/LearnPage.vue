@@ -469,7 +469,9 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
 .steps { padding-right: 18px; }
 .main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(400px, 5fr) minmax(0, 7fr); grid-template-areas: "call side"; grid-template-rows: minmax(0, 1fr); gap: 20px; border: 1px solid var(--line); background: var(--white) var(--sky) center bottom / 1200px auto repeat-x; padding: 16px; box-shadow: var(--shadow-lg); position: relative; }
 .callcol { grid-area: call; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
-.callcol :deep(.call) { flex: 1 1 auto; min-height: auto; } /* 不小于“画面 200px + 标题栏 + 控制栏”，面板再高也压不到按钮 */
+.callcol :deep(.call) { flex: none; }
+/* 老师画面固定尺寸：不随面板开合、对话多少而变化 */
+@media (min-width: 1100px) { .callcol :deep(.screen) { flex: none; height: min(320px, 36dvh); min-height: 0; } .vnote { display: none; } .panel { flex: 1 1 0; max-height: none; min-height: 0; } }
 .side { grid-area: side; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
 .composer { flex: none; }
 .vnote { margin: 6px 2px 0; color: var(--muted); flex: none; }
