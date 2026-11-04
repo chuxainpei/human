@@ -134,3 +134,6 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; } }
 .folder-tabs > *:first-child { padding-left: 14px; }
+
+/* 学习页：整页不滚动，只有对话区自己滚 */
+html.in-learn, html.in-learn body { overflow: hidden; overscroll-behavior: none; height: 100%; }

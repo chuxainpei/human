@@ -39,10 +39,10 @@ export function checkOffer(o: Offer, v: CaseVisible, h: CaseHidden): CheckResult
     { field: 'leadDays', ok: o.leadDays >= v.minimumLeadDays && o.leadDays <= v.maximumLeadDays, rule: `交付 ${v.minimumLeadDays}–${v.maximumLeadDays} 天（含边界）` },
   ]
   const buyerChecks = [
-    { field: 'unitPrice', ok: o.unitPriceCents <= h.buyerMaximumUnitPriceCents, rule: `模拟买方可接受单价上限 ${(h.buyerMaximumUnitPriceCents / 100).toFixed(2)} 美元` },
-    { field: 'quantity', ok: o.quantity === h.buyerRequiredQuantity, rule: `模拟买方需要 ${h.buyerRequiredQuantity} 件` },
-    { field: 'deposit', ok: o.depositBasisPoints <= h.buyerMaximumDepositBasisPoints, rule: `模拟买方可接受首付款上限 ${h.buyerMaximumDepositBasisPoints / 100}%` },
-    { field: 'leadDays', ok: o.leadDays <= h.buyerMaximumLeadDays, rule: `模拟买方可接受交期上限 ${h.buyerMaximumLeadDays} 天` },
+    { field: 'unitPrice', ok: o.unitPriceCents <= h.buyerMaximumUnitPriceCents, rule: `买方可接受单价上限 ${(h.buyerMaximumUnitPriceCents / 100).toFixed(2)} 美元` },
+    { field: 'quantity', ok: o.quantity === h.buyerRequiredQuantity, rule: `买方需要 ${h.buyerRequiredQuantity} 件` },
+    { field: 'deposit', ok: o.depositBasisPoints <= h.buyerMaximumDepositBasisPoints, rule: `买方可接受首付款上限 ${h.buyerMaximumDepositBasisPoints / 100}%` },
+    { field: 'leadDays', ok: o.leadDays <= h.buyerMaximumLeadDays, rule: `买方可接受交期上限 ${h.buyerMaximumLeadDays} 天` },
   ]
   const sp = sellerChecks.every((c) => c.ok), bp = buyerChecks.every((c) => c.ok)
   return { valid: true, revenueCents, costCents, grossProfitCents, grossMargin, costMarkup, seller: { pass: sp, checks: sellerChecks }, buyer: { pass: bp, checks: buyerChecks }, agreement: sp && bp }

@@ -1,25 +1,25 @@
 <script setup lang="ts">
-// 学习页 v2：延续首页“和陈老师视频通话”（docs/design-v2.md 方向 A）。
-// 桌面：左 ≈60% 通话大窗（字幕、打断/暂停/静音/结束、倾听/思考/讲话灯；磋商时买家画中画）+ 下方输入栏；
-//       右侧可拖动、可最小化到 Dock 的窗口：任务 / 对话 / 出处。提交方案后反馈窗从底部升起。
-// 手机：通话窗吸顶约 1/3 屏，下面 对话 / 任务 / 出处 标签（出处为底部抽屉），输入栏固定在底部。
+// 学习页 v3：老师展示区与底部输入栏固定不动，只有对话内容滚动。
+// 桌面：左 = 通话大窗（字幕、打断/暂停/静音/结束、倾听/思考/讲话灯；磋商时买家画中画）+ 下方输入栏；
+//       右 = 只有对话栏。任务 / 出处 / 反馈 收成对话栏上方的小按钮，点开后在对话栏上方展开（再点或 × 收起）。
+// 手机：整页不滚动。老师区固定在顶部、输入栏固定在底部；任务 / 出处 / 反馈 只在中间对话区里展开，永远不盖住老师区。
+//       常见问题收进输入框左边的按钮，点开后换行排列，不再横向滑动。
 import { fmtAnswer } from '../lib/format'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import CallStage from '../components/CallStage.vue'
 import Win from '../components/Win.vue'
-import Dock from '../components/Dock.vue'
 import RichText from '../components/RichText.vue'
 import TypingBubble from '../components/TypingBubble.vue'
-import CitationDrawer from '../components/CitationDrawer.vue'
 import { AVATARS, type AvatarId } from '../lib/avatars'
 import { buildRegistry, plain } from '../lib/cites'
-import { ask, clearError, doAction, endLearning, explain, loadEntry, negotiate, openCitation, openCitationNo, resumeSession, startSession, retryAnswer, retryQuestion, speaker, state, stopGenerating, stopSpeaking, submitFinalOffer } from '../lib/store'
+import { ask, clearError, doAction, endLearning, explain, loadEntry, negotiate, resumeSession, startSession, retryAnswer, retryQuestion, speaker, state, stopGenerating, stopSpeaking, submitFinalOffer } from '../lib/store'
 import { useTyped } from '../composables/useTyped'
 import type { Citation } from '../lib/api'
 
 const router = useRouter()
 const route = useRoute()
+const home = import.meta.env.BASE_URL
 const input = ref('')
 const inputEl = ref<HTMLTextAreaElement | null>(null)
 const mode = ref<'ask' | 'negotiate'>('ask')
@@ -30,11 +30,25 @@ const offer = reactive({ price: '', deposit: '', days: '', margin: '' })
 const retryForm = reactive({ grossProfit: '', grossMarginPercent: '', failing: [] as string[], explanation: '' })
 const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 const booting = ref(true)
-// 手机：把通话窗的实际高度写进 --call-h，让标签栏贴在它下面
-const learnEl = ref<HTMLElement | null>(null); const callEl = ref<HTMLElement | null>(null)
-let ro: ResizeObserver | null = null
-onMounted(() => { ro = new ResizeObserver(() => learnEl.value?.style.setProperty('--call-h', `${callEl.value?.offsetHeight ?? 0}px`)); if (callEl.value) ro.observe(callEl.value) })
-onBeforeUnmount(() => ro?.disconnect())
+const isMobile = () => window.matchMedia('(max-width: 1099px)').matches
+
+// ---------------------------------------------------------------- 固定布局：整页不滚动
+// 桌面：把顶部导航的高度写进 --nav-h，学习页正好占满剩下的视口；手机：跟随 visualViewport（键盘弹出时整体缩短，老师区仍在顶部）。
+let navRo: ResizeObserver | null = null
+const rootStyle = document.documentElement.style
+const onVV = () => { const vv = window.visualViewport; if (!vv) return; rootStyle.setProperty('--vvh', `${Math.round(vv.height)}px`); rootStyle.setProperty('--vvt', `${Math.round(vv.offsetTop)}px`) }
+onMounted(() => {
+  document.documentElement.classList.add('in-learn')
+  const nav = document.querySelector('header.nav') as HTMLElement | null
+  const setNav = () => rootStyle.setProperty('--nav-h', `${nav?.offsetHeight ?? 0}px`)
+  setNav(); if (nav) { navRo = new ResizeObserver(setNav); navRo.observe(nav) }
+  onVV(); window.visualViewport?.addEventListener('resize', onVV); window.visualViewport?.addEventListener('scroll', onVV)
+})
+onBeforeUnmount(() => {
+  document.documentElement.classList.remove('in-learn'); navRo?.disconnect()
+  window.visualViewport?.removeEventListener('resize', onVV); window.visualViewport?.removeEventListener('scroll', onVV)
+  for (const k of ['--nav-h', '--vvh', '--vvt']) rootStyle.removeProperty(k)
+})
 
 onMounted(async () => {
   if (!state.course) await loadEntry()
@@ -47,6 +61,7 @@ onMounted(async () => {
   }
   if (state.session?.stage === 'practice') mode.value = 'negotiate'
   booting.value = false
+  await nextTick(); scrollLog(true)
 })
 onBeforeRouteLeave(async () => { await stopGenerating() })
 onBeforeUnmount(() => { void stopGenerating() })
@@ -62,6 +77,18 @@ const ended = computed(() => !!state.session?.ended)
 const busy = computed(() => state.generating)
 const rigPhase = computed(() => state.phase)
 
+// ---------------------------------------------------------------- 面板：任务 / 出处 / 反馈（同一时间最多开一个）
+type PanelId = 'task' | 'src' | 'fb'
+const panel = ref<PanelId | null>('task')
+const taskSeen = ref(true)
+watch(panel, (p) => { if (p === 'task') taskSeen.value = true })
+function toggle(p: PanelId) { panel.value = panel.value === p ? null : p }
+const PANEL_META = computed(() => ({
+  task: { label: `任务 · ${STAGES[stageIdx.value].t}`, tone: 'orange' as const },
+  src: { label: '出处', tone: 'green' as const },
+  fb: { label: '反馈 · 方案核算', tone: 'pink' as const },
+}))
+
 // 讲话的人放大：磋商阶段买家画中画先滑进右下角，随后谁在说话谁占大画面
 const activeRole = ref<AvatarId>('teacher')
 const lastSpeaker = () => { const t = [...state.turns].reverse().find((x) => x.role === 'teacher' || x.role === 'buyer'); return (t?.role ?? 'teacher') as AvatarId }
@@ -72,7 +99,7 @@ watch(stage, (s, old) => {
   clearTimeout(swapTimer)
   if (s === 'practice') { activeRole.value = 'teacher'; swapTimer = setTimeout(() => { activeRole.value = lastSpeaker() }, reduced ? 0 : 1300) }
   else activeRole.value = 'teacher'
-  if (old && s !== old) { mtab.value = 'task'; taskSeen.value = false; mins.task = false; void nextTick(() => { document.querySelector('.w-task .taskbody')?.scrollTo({ top: 0 }) }) }
+  if (old && s !== old) { if (s === 'feedback') taskSeen.value = false; else { panel.value = 'task'; taskSeen.value = true } void nextTick(() => { document.querySelector('.panelbody')?.scrollTo({ top: 0 }) }) }
 }, { immediate: true })
 const mainRole = computed<AvatarId>(() => (stage.value === 'practice' ? activeRole.value : 'teacher'))
 const pipRole = computed<AvatarId | null>(() => (stage.value === 'practice' ? (mainRole.value === 'buyer' ? 'teacher' : 'buyer') : null))
@@ -87,46 +114,35 @@ const subtitle = computed(() => {
   return ''
 })
 
-// ---------------------------------------------------------------- 出处（上标编号）
+// ---------------------------------------------------------------- 出处（上标编号 [n] → 出处面板里对应的那一条）
 const facts = computed<Citation[]>(() => state.course?.facts ?? [])
 const registry = computed(() => buildRegistry(state.turns, facts.value))
-function openCite(c: Citation, n?: number) { openCitationNo.value = n ?? registry.value.findIndex((x) => x.id === c.id) + 1; openCitation.value = c; srcSheet.value = false }
-const srcSheet = ref(false)
+const srcSel = ref<string | null>(null)
+async function openCite(c: Citation) {
+  srcSel.value = c.id; panel.value = 'src'
+  await nextTick(); document.querySelector(`[data-src="${c.id}"]`)?.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' })
+}
 
-// ---------------------------------------------------------------- 窗口、Dock、手机标签
-const mins = reactive({ task: false, chat: false, src: false })
-const WINS = { task: { label: '任务', tone: 'orange' }, chat: { label: '对话', tone: 'purple' }, src: { label: '出处', tone: 'green' } } as const
-const dockItems = computed(() => [
-  ...(Object.keys(WINS) as (keyof typeof WINS)[]).filter((k) => mins[k]).map((k) => ({ id: k, ...WINS[k] })),
-  ...(fbMin.value && fbAvailable.value ? [{ id: 'fb', label: '反馈', tone: 'pink' }] : []),
-])
-function restore(id: string) { if (id === 'fb') { fbMin.value = false; return } mins[id as keyof typeof mins] = false }
-const mtab = ref<'chat' | 'task'>('task')
-const taskSeen = ref(true)
-watch(mtab, (t) => { if (t === 'task') taskSeen.value = true })
-const isMobile = () => window.matchMedia('(max-width: 1099px)').matches
-// 新消息：桌面滚对话窗，手机（整页滚动）滚到页底；对话标签不在前台时不打扰
-watch(() => state.turns.length, async () => {
-  await nextTick()
-  if (isMobile()) { if (mtab.value === 'chat') window.scrollTo({ top: document.documentElement.scrollHeight, behavior: reduced ? 'auto' : 'smooth' }) }
-  else if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight
-})
-watch(mtab, async (t) => { if (t === 'chat' && isMobile()) { await nextTick(); window.scrollTo({ top: document.documentElement.scrollHeight }) } })
-watch(() => lastBot.value?.text.length, async () => {
-  await nextTick()
-  if (isMobile()) { const d = document.documentElement; if (mtab.value === 'chat' && d.scrollHeight - d.scrollTop - innerHeight < 220) d.scrollTop = d.scrollHeight; return }
-  const el = logEl.value; if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight
-})
+// ---------------------------------------------------------------- 对话滚动：只有对话区自己滚
+function scrollLog(force = false) {
+  const el = logEl.value; if (!el) return
+  if (force || el.scrollHeight - el.scrollTop - el.clientHeight < 200) el.scrollTop = el.scrollHeight
+}
+watch(() => state.turns.length, async () => { await nextTick(); scrollLog(true) })
+watch(() => lastBot.value?.text.length, async () => { await nextTick(); scrollLog() })
+watch(panel, async () => { await nextTick(); scrollLog() })
 
 // ---------------------------------------------------------------- 输入
 const SUGGEST = ['毛利率和成本加成率有什么区别？', '最终方案必须写清哪些条件？', '本案例单位成本是多少？', 'CIP 的保险要求是什么？']
 const DEAL = ['每件 13.5 美元，首付款 30%，20 天交货', '我们单位成本是 10 美元，所以报价不能低于 12 美元', '理解您关心价格，我可以把首付款保持在 30%']
 const negotiating = computed(() => mode.value === 'negotiate' && stage.value === 'practice')
-// 占位符要短（手机一行放得下）：完整问题在下面的芯片里
-const phLines = computed(() => (negotiating.value ? ['对买家说：每件 13.5 美元', '对买家说：首付款 30%', '对买家说：20 天交货'] : ['问陈老师：毛利率怎么算？', '问陈老师：首付款最少多少？', '问陈老师：报价要写清什么？', '问陈老师：CIP 保险要求？']))
+const chipsOpen = ref(false)
+// 占位符要短（手机一行放得下，不折行）：完整问题在“常见问题”里
+const phLines = computed(() => (negotiating.value ? ['对买家说：每件 13.5 美元', '对买家说：首付款 30%', '对买家说：20 天交货'] : ['问：毛利率怎么算？', '问：首付款最少多少？', '问：报价要写清什么？', '问：CIP 保险要求？']))
 const typedPh = useTyped(phLines)
 const canSend = computed(() => !!input.value.trim() && !paused.value && !ended.value)
 function suggest(q: string) {
+  chipsOpen.value = false
   if (negotiating.value) { input.value = q; inputEl.value?.focus(); return } // 谈判示例只填入，方便改
   input.value = q; void send()
 }
@@ -135,14 +151,20 @@ function toggleVoice() {
   if (!voiceOn.value) { stopSpeaking(); speaker.mode = 'off' } else speaker.mode = state.caps?.ttsMode === 'server-edge' ? 'server' : 'browser'
 }
 async function interrupt() { await stopGenerating(); inputEl.value?.focus() }
+// 防重复发送：同一句话 4 秒内只发一次（连点芯片 / 回车 + 点击 都会造成同一个问题出现两遍）
+let lastSent = { t: '', at: 0 }
 async function send() {
-  mtab.value = 'chat'; mins.chat = false
-  const t = input.value.trim(); if (!t) return
-  input.value = ''
+  const t = input.value.trim(); if (!t || paused.value || ended.value) return
+  const now = Date.now()
+  if (t === lastSent.t && now - lastSent.at < 4000) { input.value = ''; return }
+  lastSent = { t, at: now }
+  input.value = ''; chipsOpen.value = false
+  if (isMobile() && panel.value !== 'fb') panel.value = null // 手机：发问后把对话区让出来
   if (negotiating.value) await negotiate(t)
   else await ask(t)
 }
 function onKey(e: KeyboardEvent) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (canSend.value) void send() } }
+function doExplain(id: string, again = false) { if (isMobile()) panel.value = null; void explain(id, again) }
 
 // ---------------------------------------------------------------- 方案、反馈、复练
 const toCents = (s: string) => Math.round(parseFloat(s) * 100)
@@ -153,8 +175,8 @@ async function submitOffer() {
   if (!Number.isFinite(body.unitPriceCents) || !Number.isFinite(body.depositBasisPoints) || !Number.isInteger(body.leadDays)) { offerErr.value = '请把单价、首付款比例、交付天数都填成数字（交付天数为整数）'; return }
   await submitFinalOffer(body)
 }
-async function startRetry() { fbMin.value = true; mtab.value = 'task'; await doAction('retry'); await retryQuestion() }
-async function againDeal() { fbMin.value = true; mtab.value = 'chat'; await doAction('restartPractice') }
+async function startRetry() { await doAction('retry'); panel.value = 'task'; await retryQuestion() }
+async function againDeal() { panel.value = null; await doAction('restartPractice') }
 const retryErr = ref('')
 async function submitRetry() {
   const q = state.retryQuestion; if (!q) return
@@ -165,19 +187,18 @@ async function submitRetry() {
     : { failing: retryForm.failing, explanation: retryForm.explanation }
   await retryAnswer(body)
 }
-const roleName = (r: string) => ({ student: '你', teacher: AVATARS.teacher.name, buyer: AVATARS.buyer.name + ' · 模拟买家', system: '课堂' } as Record<string, string>)[r] ?? r
+const roleName = (r: string) => ({ student: '你', teacher: AVATARS.teacher.name, buyer: AVATARS.buyer.name + ' · 海外买家', system: '课堂' } as Record<string, string>)[r] ?? r
 const money = (c?: number) => (c === undefined ? '—' : (c / 100).toFixed(2))
 const fieldName: Record<string, string> = { unitPrice: '单价', quantity: '数量', deposit: '首付款', leadDays: '交期' }
 const marginErrText: Record<string, string> = { none: '你算的毛利率正确', 'used-markup': '你填的是成本加成率，不是毛利率', wrong: '你算的毛利率不对', 'not-provided': '你没有填写自己算的毛利率' }
 const feedback = ref<Record<string, any> | null>(null)
 let fbTimer: ReturnType<typeof setInterval> | undefined
-const fbMin = ref(false)
-const fbAvailable = computed(() => !!state.check && stage.value === 'feedback')
-const fbShow = computed(() => fbAvailable.value && !fbMin.value)
+const fbAvailable = computed(() => !!state.check && (stage.value === 'feedback' || stage.value === 'retry' || stage.value === 'done'))
+watch(fbAvailable, (v) => { if (!v && panel.value === 'fb') panel.value = null })
 watch(() => state.check, (c) => {
   clearInterval(fbTimer); feedback.value = null
   if (!c || !state.session) return
-  fbMin.value = false
+  panel.value = 'fb'
   const id = state.session.id
   const poll = async () => { const { api } = await import('../lib/api'); const r = await api.report(id).catch(() => null); if (r?.feedback && r.feedback.status !== 'pending') { feedback.value = r.feedback; clearInterval(fbTimer) } }
   void poll(); fbTimer = setInterval(poll, 1500)
@@ -202,8 +223,8 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
 </script>
 
 <template>
-  <main ref="learnEl" class="learn" :class="{ 'is-paused': paused, 'fb-open': fbShow }">
-    <!-- 课程栏：标题 + 首页同款文件夹标签进度 -->
+  <main class="learn" :class="{ 'is-paused': paused }">
+    <!-- 课程栏：标题 + 首页同款文件夹标签进度（桌面） -->
     <div class="classbar">
       <div class="classbar__t"><span class="label pink">嘟囔课堂</span><h1>{{ state.course?.unit ?? '出口报价与交易磋商' }}</h1></div>
       <ol class="folder-tabs steps" aria-label="课程进度">
@@ -212,141 +233,197 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
     </div>
 
     <div class="main">
-      <!-- 左：通话大窗 + 输入栏 -->
-      <section ref="callEl" class="callcol" aria-label="视频通话">
-        <div class="callsticky">
-          <CallStage :main="mainRole" :pip="pipRole" :phase="rigPhase" :level="speaker.level" :subtitle="subtitle" :reduced-motion="reduced" :paused="paused"
-            :title="stage === 'practice' ? '情景磋商 · 三方通话' : '面对面课堂 · 陈老师'" :error-text="state.error ?? ''" @retry="clearError" @swap="swap">
-            <button class="cb" :disabled="!busy && !state.speaking" title="打断：停下声音和正在生成的回答，马上问新问题" @click="interrupt"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg><span>打断</span></button>
-            <button class="cb" :disabled="ended" :title="paused ? '继续上课' : '暂停上课'" @click="doAction(paused ? 'resume' : 'pause')"><svg v-if="!paused" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12" /></svg><svg v-else viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" /></svg><span>{{ paused ? '继续' : '暂停' }}</span></button>
-            <button class="cb" :aria-pressed="!voiceOn" :title="voiceOn ? '静音' : '打开声音'" @click="toggleVoice"><svg viewBox="0 0 24 24"><path d="M4 10v4h4l5 4V6L8 10z" /><path v-if="voiceOn" d="M16 9a4 4 0 010 6" /><path v-else d="M16 9l5 6M21 9l-5 6" /></svg><span>{{ voiceOn ? '静音' : '开声音' }}</span></button>
-            <button class="cb end" :disabled="ended" title="结束本节课" @click="endLearning"><svg viewBox="0 0 24 24"><path d="M3 14c5-5 13-5 18 0l-2.5 2.5-3-2v-2.5c-2.3-.7-4.7-.7-7 0V14.5l-3 2z" /></svg><span>结束</span></button>
-          </CallStage>
-        </div>
+      <!-- 左 / 顶部：老师展示区（固定） -->
+      <section class="callcol" aria-label="视频通话">
+        <CallStage :main="mainRole" :pip="pipRole" :phase="rigPhase" :level="speaker.level" :subtitle="subtitle" :reduced-motion="reduced" :paused="paused"
+          :title="stage === 'practice' ? '情景磋商 · 三方通话' : '面对面课堂 · 陈老师'" :error-text="state.error ?? ''" @retry="clearError" @swap="swap">
+          <button class="cb" :disabled="!busy && !state.speaking" title="打断：停下声音和正在生成的回答，马上问新问题" @click="interrupt"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg><span>打断</span></button>
+          <button class="cb" :disabled="ended" :title="paused ? '继续上课' : '暂停上课'" @click="doAction(paused ? 'resume' : 'pause')"><svg v-if="!paused" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12" /></svg><svg v-else viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" /></svg><span>{{ paused ? '继续' : '暂停' }}</span></button>
+          <button class="cb" :aria-pressed="!voiceOn" :title="voiceOn ? '静音' : '打开声音'" @click="toggleVoice"><svg viewBox="0 0 24 24"><path d="M4 10v4h4l5 4V6L8 10z" /><path v-if="voiceOn" d="M16 9a4 4 0 010 6" /><path v-else d="M16 9l5 6M21 9l-5 6" /></svg><span>{{ voiceOn ? '静音' : '开声音' }}</span></button>
+          <button class="cb end" :disabled="ended" title="结束本节课" @click="endLearning"><svg viewBox="0 0 24 24"><path d="M3 14c5-5 13-5 18 0l-2.5 2.5-3-2v-2.5c-2.3-.7-4.7-.7-7 0V14.5l-3 2z" /></svg><span>结束</span></button>
+        </CallStage>
         <p v-if="state.voiceNote" class="vnote small">声音：{{ state.voiceNote }}，字幕照常显示。</p>
       </section>
 
-      <!-- 手机/平板：对话 / 任务 / 出处 -->
-      <div class="mtabs" role="tablist" aria-label="切换面板">
-        <button role="tab" :aria-selected="mtab === 'chat'" :class="{ on: mtab === 'chat' }" @click="mtab = 'chat'">对话<span class="cnt">{{ state.turns.length }}</span></button>
-        <button role="tab" :aria-selected="mtab === 'task'" :class="{ on: mtab === 'task' }" @click="mtab = 'task'">任务<span class="cnt">{{ stageIdx + 1 }}/{{ STAGES.length }}</span><i v-if="!taskSeen" class="dot" aria-label="有新任务"></i></button>
-        <button role="tab" :aria-selected="srcSheet" @click="srcSheet = true">出处<span class="cnt">{{ registry.length }}</span></button>
-      </div>
+      <!-- 右 / 中间：对话栏（只有这里滚动）。任务 / 出处 / 反馈 是上方的小按钮 -->
+      <section class="side" aria-label="对话">
+        <div class="tools no-print" role="toolbar" aria-label="课堂面板">
+          <button type="button" class="tool t-orange" :class="{ on: panel === 'task' }" :aria-expanded="panel === 'task'" @click="toggle('task')">
+            <i></i>任务<span class="cnt">{{ stageIdx + 1 }}/{{ STAGES.length }}<span class="cnt-l"> · {{ STAGES[stageIdx].t }}</span></span><b v-if="!taskSeen" class="dot" aria-label="有新任务"></b>
+          </button>
+          <button type="button" class="tool t-green" :class="{ on: panel === 'src' }" :aria-expanded="panel === 'src'" @click="toggle('src')"><i></i>出处<span class="cnt">{{ registry.length }}</span></button>
+          <button v-if="fbAvailable" type="button" class="tool t-pink" :class="{ on: panel === 'fb' }" :aria-expanded="panel === 'fb'" @click="toggle('fb')"><i></i>反馈<span class="cnt">{{ okCount(chk?.seller) }}</span></button>
+          <a :href="home" class="tool t-home">首页</a>
+        </div>
 
-      <!-- 右：窗口栈（可拖动、可最小化到 Dock） -->
-      <div class="stack">
-        <Win v-show="!mins.task" class="w-task" :class="{ 'm-off': mtab !== 'task' }" :label="`任务 · ${STAGES[stageIdx].t}`" tone="orange" draggable minimizable dock enter body-class="taskbody" @minimize="mins.task = true">
-          <div :key="stage" class="px-fade task">
-            <div v-if="state.error" class="alert" role="alert"><span>{{ state.error }}</span><button class="px-btn" @click="clearError">知道了</button></div>
-            <p v-if="booting && !state.session" class="muted">正在接通陈老师…</p>
+        <Transition name="pop">
+          <Win v-if="panel" :key="panel" class="panel" :class="`p-${panel}`" :label="PANEL_META[panel].label" :tone="PANEL_META[panel].tone" closable body-class="panelbody" @close="panel = null">
+            <!-- 任务 -->
+            <div v-if="panel === 'task'" :key="stage" class="px-fade task">
+              <div v-if="state.error" class="alert" role="alert"><span>{{ state.error }}</span><button class="px-btn" @click="clearError">知道了</button></div>
+              <p v-if="booting && !state.session" class="muted">正在接通陈老师…</p>
 
-            <template v-if="stage === 'intro'">
-              <h2>你是出口企业的业务员</h2>
-              <p>海外买家要 500 件样品。先跟陈老师弄懂三个知识点，再和模拟买家谈一轮，最后提交一份完整方案。</p>
-              <ul class="goals"><li v-for="g in state.course?.learningGoals ?? []" :key="g">{{ g }}</li></ul>
-              <p class="muted small">随时可以在下方输入框向陈老师提问；回答里的 [1] [2] 点开就是原文。</p>
-              <button class="px-btn is-pink" @click="doAction('next')" :disabled="paused || !state.session">开始讲解</button>
-            </template>
+              <template v-if="stage === 'intro'">
+                <h2>你是出口企业的业务员</h2>
+                <p>海外买家要 500 件样品。先跟陈老师弄懂三个知识点，再和这位买家谈一轮，最后提交一份完整方案。</p>
+                <ul class="goals"><li v-for="g in state.course?.learningGoals ?? []" :key="g">{{ g }}</li></ul>
+                <p class="muted small">随时可以在下方输入框向陈老师提问；回答里的 [1] [2] 点开就是原文。</p>
+                <button class="px-btn is-pink" @click="doAction('next')" :disabled="paused || !state.session">开始讲解</button>
+              </template>
 
-            <template v-if="stage === 'explain'">
-              <div class="ktabs" role="tablist" aria-label="知识卡">
-                <button v-for="(c, i) in (cards as any[])" :key="c.id" role="tab" :aria-selected="activeCard === c.id" :class="{ on: activeCard === c.id }" @click="activeCard = c.id">
-                  <span class="n">{{ Number(i) + 1 }}</span>{{ c.title }}<span v-if="state.session?.explainedCards.includes(c.id)" class="tick" aria-label="已讲解">✓</span>
-                </button>
-              </div>
-              <template v-for="c in cards" :key="c.id">
-                <div v-if="activeCard === c.id" class="kcard px-fade">
-                  <p class="muted small">学习目标：{{ c.goal }}</p>
-                  <div class="row">
-                    <button class="px-btn is-pink" :disabled="busy || paused" @click="explain(c.id)">{{ state.session?.explainedCards.includes(c.id) ? '再讲一遍' : '请陈老师讲解' }}</button>
-                    <button class="px-btn" :disabled="busy || paused || !state.session?.explainedCards.includes(c.id)" @click="explain(c.id, true)">换个例子</button>
+              <template v-if="stage === 'explain'">
+                <div class="ktabs" role="tablist" aria-label="知识卡">
+                  <button v-for="(c, i) in (cards as any[])" :key="c.id" role="tab" :aria-selected="activeCard === c.id" :class="{ on: activeCard === c.id }" @click="activeCard = c.id">
+                    <span class="n">{{ Number(i) + 1 }}</span>{{ c.title }}<span v-if="state.session?.explainedCards.includes(c.id)" class="tick" aria-label="已讲解">✓</span>
+                  </button>
+                </div>
+                <template v-for="c in cards" :key="c.id">
+                  <div v-if="activeCard === c.id" class="kcard px-fade">
+                    <p class="muted small">学习目标：{{ c.goal }}</p>
+                    <div class="row">
+                      <button class="px-btn is-pink" :disabled="busy || paused" @click="doExplain(c.id)">{{ state.session?.explainedCards.includes(c.id) ? '再讲一遍' : '请陈老师讲解' }}</button>
+                      <button class="px-btn" :disabled="busy || paused || !state.session?.explainedCards.includes(c.id)" @click="doExplain(c.id, true)">换个例子</button>
+                    </div>
+                    <div v-if="state.lastExample" class="example"><b>当前例子（系统算好）</b><span v-for="(v, k2) in state.lastExample" :key="k2">{{ k2 }}：{{ v }}</span></div>
                   </div>
-                  <div v-if="state.lastExample" class="example"><b>当前例子（系统算好）</b><span v-for="(v, k2) in state.lastExample" :key="k2">{{ k2 }}：{{ v }}</span></div>
+                </template>
+                <hr />
+                <p class="small">准备好了，就和海外买家 Markus Weber 磋商。他只关心自己的条件，不会替你写方案。</p>
+                <button class="px-btn is-pink" :disabled="busy || paused" @click="doAction('startPractice')">开始买方谈判</button>
+              </template>
+
+              <template v-if="stage === 'practice'">
+                <h2>{{ kase?.title }}</h2>
+                <div class="facts3">
+                  <div class="fact"><b>{{ money(kase?.unitCostCents) }}</b><span>美元 单位成本</span></div>
+                  <div class="fact"><b>{{ kase?.quantity }}</b><span>件 固定数量</span></div>
+                  <div class="fact"><b>{{ state.session?.practice.rounds ?? 0 }}</b><span>轮 已磋商</span></div>
+                </div>
+                <table class="kv small"><tbody>
+                  <tr><th>卖方期望价</th><td>{{ money(kase?.sellerDesiredUnitPriceCents) }} 美元</td><th>卖方最低价</th><td>{{ money(kase?.sellerMinimumUnitPriceCents) }} 美元</td></tr>
+                  <tr><th>首付款</th><td>不少于 {{ (kase?.minimumDepositBasisPoints ?? 0) / 100 }}%</td><th>交付</th><td>{{ kase?.minimumLeadDays }}–{{ kase?.maximumLeadDays }} 天</td></tr>
+                </tbody></table>
+                <p class="muted small">建议谈 {{ kase?.suggestedDialogueRounds?.minimum }}–{{ kase?.suggestedDialogueRounds?.maximum }} 轮。聊天里说“成交”不算数，以下面提交的方案为准。</p>
+                <form class="offer" novalidate @submit.prevent="submitOffer">
+                  <label>单价（美元）<input v-model="offer.price" inputmode="decimal" placeholder="如 12.50" required /></label>
+                  <label>数量<input :value="kase?.quantity" disabled aria-label="数量（固定）" /></label>
+                  <label>首付款（%）<input v-model="offer.deposit" inputmode="decimal" placeholder="如 30" required /></label>
+                  <label>交付天数<input v-model="offer.days" inputmode="numeric" placeholder="如 20" required /></label>
+                  <label class="wide">你算出的毛利率（%）<input v-model="offer.margin" inputmode="decimal" placeholder="选填，系统会核对" /></label>
+                  <button class="px-btn is-pink wide" type="submit" :disabled="paused">提交最终方案</button>
+                  <p v-if="offerErr" class="pill red wide">{{ offerErr }}</p>
+                </form>
+              </template>
+
+              <template v-if="stage === 'feedback' && state.check">
+                <h2>方案已核算</h2>
+                <div class="facts3">
+                  <div class="fact"><b>{{ chk?.valid ? chk.grossMarginText : '—' }}</b><span>毛利率</span></div>
+                  <div class="fact"><b>{{ okCount(chk?.seller) }}</b><span>卖方条件</span></div>
+                  <div class="fact"><b>{{ observed }}</b><span>表达观察</span></div>
+                </div>
+                <div class="row">
+                  <button class="px-btn is-pink" :disabled="busy || paused" @click="startRetry">练我没掌握的部分</button>
+                  <button class="px-btn" @click="panel = 'fb'">打开反馈</button>
+                  <button class="px-btn" :disabled="busy" @click="againDeal">重新谈一次</button>
                 </div>
               </template>
-              <hr />
-              <p class="small">准备好了，就和模拟买家 Markus Weber 磋商。他只关心自己的条件，不会替你写方案。</p>
-              <button class="px-btn is-pink" :disabled="busy || paused" @click="doAction('startPractice')">开始买方谈判</button>
-            </template>
 
-            <template v-if="stage === 'practice'">
-              <h2>{{ kase?.title }}</h2>
-              <div class="facts3">
-                <div class="fact"><b>{{ money(kase?.unitCostCents) }}</b><span>美元 单位成本</span></div>
-                <div class="fact"><b>{{ kase?.quantity }}</b><span>件 固定数量</span></div>
-                <div class="fact"><b>{{ state.session?.practice.rounds ?? 0 }}</b><span>轮 已磋商</span></div>
-              </div>
-              <table class="kv small"><tbody>
-                <tr><th>卖方期望价</th><td>{{ money(kase?.sellerDesiredUnitPriceCents) }} 美元</td><th>卖方最低价</th><td>{{ money(kase?.sellerMinimumUnitPriceCents) }} 美元</td></tr>
-                <tr><th>首付款</th><td>不少于 {{ (kase?.minimumDepositBasisPoints ?? 0) / 100 }}%</td><th>交付</th><td>{{ kase?.minimumLeadDays }}–{{ kase?.maximumLeadDays }} 天</td></tr>
-              </tbody></table>
-              <p class="muted small">建议谈 {{ kase?.suggestedDialogueRounds?.minimum }}–{{ kase?.suggestedDialogueRounds?.maximum }} 轮。聊天里说“成交”不算数，以下面提交的方案为准。</p>
-              <form class="offer" novalidate @submit.prevent="submitOffer">
-                <label>单价（美元）<input v-model="offer.price" inputmode="decimal" placeholder="如 12.50" required /></label>
-                <label>数量<input :value="kase?.quantity" disabled aria-label="数量（固定）" /></label>
-                <label>首付款（%）<input v-model="offer.deposit" inputmode="decimal" placeholder="如 30" required /></label>
-                <label>交付天数<input v-model="offer.days" inputmode="numeric" placeholder="如 20" required /></label>
-                <label class="wide">你算出的毛利率（%）<input v-model="offer.margin" inputmode="decimal" placeholder="选填，系统会核对" /></label>
-                <button class="px-btn is-pink wide" type="submit" :disabled="paused">提交最终方案</button>
-                <p v-if="offerErr" class="pill red wide">{{ offerErr }}</p>
-              </form>
-            </template>
+              <template v-if="stage === 'retry' || (stage === 'done' && state.retryQuestion)">
+                <h2>针对性复练</h2>
+                <p v-if="!state.retryQuestion" class="muted"><TypingBubble who="陈老师" /> 正在根据你的错误出题</p>
+                <template v-else>
+                  <p class="pill amber reason">{{ state.retryQuestion.reason }}</p>
+                  <p class="q">{{ plain(state.retryQuestion.question) }}</p>
+                  <form v-if="!state.retryResult" class="offer" novalidate @submit.prevent="submitRetry">
+                    <template v-if="state.retryQuestion.type === 'margin'">
+                      <label>毛利（美元）<input v-model="retryForm.grossProfit" inputmode="decimal" required /></label>
+                      <label>毛利率（%）<input v-model="retryForm.grossMarginPercent" inputmode="decimal" required /></label>
+                    </template>
+                    <fieldset v-else class="wide"><legend>不满足的卖方条件</legend>
+                      <label v-for="f in ['unitPrice', 'deposit', 'leadDays']" :key="f" class="chk"><input type="checkbox" :value="f" v-model="retryForm.failing" /> {{ fieldName[f] }}</label>
+                    </fieldset>
+                    <label class="wide">一句话说明<textarea v-model="retryForm.explanation" rows="2" maxlength="300"></textarea></label>
+                    <button class="px-btn is-pink wide" :disabled="busy || paused">提交答案</button>
+                    <p v-if="retryErr" class="pill red wide">{{ retryErr }}</p>
+                  </form>
+                  <div v-else>
+                    <p class="pill" :class="state.retryResult.grade?.correct ? 'ok' : 'red'">{{ state.retryResult.grade?.correct ? '全部正确' : '还有错误' }}</p>
+                    <ul class="small"><li v-for="d in state.retryResult.grade?.details" :key="d">{{ d }}</li></ul>
+                    <p class="small muted">参考答案：{{ fmtAnswer(state.retryResult.answer) }}</p>
+                    <div class="row"><RouterLink to="/report" class="px-btn is-pink">查看学习报告</RouterLink><button class="px-btn" :disabled="busy" @click="againDeal">重新谈一次</button></div>
+                  </div>
+                </template>
+              </template>
 
-            <template v-if="stage === 'feedback' && state.check">
-              <h2>方案已核算</h2>
-              <div class="facts3">
+              <template v-if="stage === 'done' && !state.retryQuestion">
+                <h2>本节课结束了</h2>
+                <p>谢谢你陪陈老师上完这节课。学习报告里有对话、方案核算和建议，可以打印。</p>
+                <div class="row"><RouterLink to="/report" class="px-btn is-pink">查看学习报告</RouterLink><button class="px-btn" @click="againDeal">重新练习</button></div>
+              </template>
+            </div>
+
+            <!-- 出处：点对话里的 [n] 就展开对应这一条 -->
+            <div v-else-if="panel === 'src'" class="srcp">
+              <p v-if="!registry.length" class="muted small">还没有引用。陈老师回答时引用的资料会按顺序列在这里，对话里的 [1] [2] 点开就是对应原文。</p>
+              <ol v-else class="srcs">
+                <li v-for="(c, i) in registry" :key="c.id" :data-src="c.id" :class="{ open: srcSel === c.id }">
+                  <button type="button" class="src" :aria-expanded="srcSel === c.id" @click="srcSel = srcSel === c.id ? null : c.id"><span class="n">[{{ i + 1 }}]</span><span class="t">{{ c.title }}</span><span class="k">{{ c.sourceUrl ? '公开资料' : '案例条件' }}</span></button>
+                  <div v-if="srcSel === c.id" class="srcd px-fade">
+                    <p class="text">{{ c.text }}</p>
+                    <blockquote v-if="c.quote" lang="en">原文摘录：{{ c.quote }}</blockquote>
+                    <p v-if="c.sourceUrl" class="small"><a :href="c.sourceUrl" target="_blank" rel="noopener">打开原始网页</a></p>
+                    <p v-else class="small muted">这是本节练习的案例条件，只在这次练习中适用。</p>
+                  </div>
+                </li>
+              </ol>
+            </div>
+
+            <!-- 反馈 · 方案核算 -->
+            <div v-else class="fbp">
+              <div class="fstrip">
                 <div class="fact"><b>{{ chk?.valid ? chk.grossMarginText : '—' }}</b><span>毛利率</span></div>
+                <div class="fact"><b>{{ chk?.valid ? fmtNum(chk.grossProfit) : '—' }}</b><span>美元毛利</span></div>
                 <div class="fact"><b>{{ okCount(chk?.seller) }}</b><span>卖方条件</span></div>
+                <div class="fact"><b>{{ okCount(chk?.buyer) }}</b><span>买家条件</span></div>
                 <div class="fact"><b>{{ observed }}</b><span>表达观察</span></div>
               </div>
-              <p v-if="fbShow" class="muted small">完整反馈在下方升起的窗口里。</p>
-              <div v-else class="row">
-                <button class="px-btn is-pink" :disabled="busy || paused" @click="startRetry">练我没掌握的部分</button>
-                <button class="px-btn" @click="fbMin = false">打开反馈</button>
-                <button class="px-btn" :disabled="busy" @click="againDeal">重新谈一次</button>
+              <div class="fbgrid">
+                <h3>{{ chk?.agreement ? '双方条件都满足，达成本练习目标' : '还没有达成本练习目标' }}</h3>
+                <p v-if="chk?.valid" class="small">销售收入 {{ chk.revenue }} 美元，总成本 {{ chk.cost }} 美元，毛利 {{ chk.grossProfit }} 美元；毛利率 {{ chk.grossMarginText }}，成本加成率 {{ chk.costMarkupText }}。</p>
+                <p v-if="state.check?.studentMarginError" class="pill" :class="state.check.studentMarginError === 'none' ? 'ok' : 'amber'">{{ marginErrText[state.check.studentMarginError] }}</p>
+                <h4>没达到的地方</h4>
+                <p v-if="!misses.length" class="small">都达到了。可以重新谈一次，试试别的说法。</p>
+                <ul class="miss">
+                  <li v-for="m in misses" :key="m.k"><span>{{ m.t }}</span>
+                    <button class="px-btn" :disabled="busy || paused" @click="m.how === 'retry' ? startRetry() : againDeal()">{{ m.how === 'retry' ? '练这一项' : '再谈一次' }}</button></li>
+                </ul>
+                <h4>表达建议（附你的原话）</h4>
+                <p v-if="!feedback" class="muted small"><TypingBubble who="陈老师" /> 正在根据你的对话写建议</p>
+                <p v-else-if="feedback.status === 'error'" class="pill red">建议暂时没写出来，客观核算不受影响。</p>
+                <template v-else>
+                  <div v-for="d in feedback.dimensions" :key="d.id" class="dim">
+                    <b>{{ d.name }}</b> <span class="pill" :class="d.status === 'observed' ? 'ok' : 'grey'">{{ d.status === 'observed' ? '观察到' : '未观察到' }}</span>
+                    <blockquote v-if="d.quote">“{{ d.quote }}”</blockquote>
+                    <p class="small">{{ plain(d.comment) }} <span class="muted">建议：{{ plain(d.suggestion) }}</span></p>
+                  </div>
+                  <p class="small">{{ plain(feedback.summary) }}</p>
+                </template>
               </div>
-            </template>
+              <div class="row fbbtns">
+                <button class="px-btn is-pink" :disabled="busy || paused" @click="startRetry">练我没掌握的部分</button>
+                <button class="px-btn" :disabled="busy" @click="againDeal">重新谈一次</button>
+                <RouterLink to="/report" class="px-btn">查看学习报告</RouterLink>
+              </div>
+            </div>
+          </Win>
+        </Transition>
 
-            <template v-if="stage === 'retry' || (stage === 'done' && state.retryQuestion)">
-              <h2>针对性复练</h2>
-              <p v-if="!state.retryQuestion" class="muted"><TypingBubble who="陈老师" /> 正在根据你的错误出题</p>
-              <template v-else>
-                <p class="pill amber reason">{{ state.retryQuestion.reason }}</p>
-                <p class="q">{{ plain(state.retryQuestion.question) }}</p>
-                <form v-if="!state.retryResult" class="offer" novalidate @submit.prevent="submitRetry">
-                  <template v-if="state.retryQuestion.type === 'margin'">
-                    <label>毛利（美元）<input v-model="retryForm.grossProfit" inputmode="decimal" required /></label>
-                    <label>毛利率（%）<input v-model="retryForm.grossMarginPercent" inputmode="decimal" required /></label>
-                  </template>
-                  <fieldset v-else class="wide"><legend>不满足的卖方条件</legend>
-                    <label v-for="f in ['unitPrice', 'deposit', 'leadDays']" :key="f" class="chk"><input type="checkbox" :value="f" v-model="retryForm.failing" /> {{ fieldName[f] }}</label>
-                  </fieldset>
-                  <label class="wide">一句话说明<textarea v-model="retryForm.explanation" rows="2" maxlength="300"></textarea></label>
-                  <button class="px-btn is-pink wide" :disabled="busy || paused">提交答案</button>
-                  <p v-if="retryErr" class="pill red wide">{{ retryErr }}</p>
-                </form>
-                <div v-else>
-                  <p class="pill" :class="state.retryResult.grade?.correct ? 'ok' : 'red'">{{ state.retryResult.grade?.correct ? '全部正确' : '还有错误' }}</p>
-                  <ul class="small"><li v-for="d in state.retryResult.grade?.details" :key="d">{{ d }}</li></ul>
-                  <p class="small muted">参考答案：{{ fmtAnswer(state.retryResult.answer) }}</p>
-                  <div class="row"><RouterLink to="/report" class="px-btn is-pink">查看学习报告</RouterLink><button class="px-btn" :disabled="busy" @click="againDeal">重新谈一次</button></div>
-                </div>
-              </template>
-            </template>
-
-            <template v-if="stage === 'done' && !state.retryQuestion">
-              <h2>本节课结束了</h2>
-              <p>谢谢你陪陈老师上完这节课。学习报告里有对话、方案核算和建议，可以打印。</p>
-              <div class="row"><RouterLink to="/report" class="px-btn is-pink">查看学习报告</RouterLink><button class="px-btn" @click="againDeal">重新练习</button></div>
-            </template>
-          </div>
-        </Win>
-
-        <Win v-show="!mins.chat" class="w-chat" :class="{ 'm-off': mtab !== 'chat' }" label="对话" tone="purple" draggable minimizable dock enter body-class="chatbody" @minimize="mins.chat = true">
+        <Win class="w-chat" label="对话" tone="purple" body-class="chatbody">
           <template #bar><span class="cntb">{{ state.turns.length }} 条</span></template>
           <div ref="logEl" class="log" aria-live="polite">
             <div v-if="!state.turns.length" class="empty">
-              <div class="empty__b"><i></i>{{ stage === 'practice' ? '我是模拟买家，先报个价吧。' : '同学你好，我是陈老师。' }}<b>{{ stage === 'practice' ? '价格、首付款、交期都可以谈。' : '哪里没懂，直接问我。' }}</b></div>
+              <div class="empty__b"><i></i>{{ stage === 'practice' ? '我是 Markus Weber，先报个价吧。' : '同学你好，我是陈老师。' }}<b>{{ stage === 'practice' ? '价格、首付款、交期都可以谈。' : '哪里没懂，直接问我。' }}</b></div>
               <p class="muted small">回答里的 [1] [2] 是出处，点开能看到原文。</p>
             </div>
             <template v-for="t in state.turns" :key="t.turnId">
@@ -363,106 +440,39 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
             </template>
           </div>
         </Win>
+      </section>
 
-        <Win v-show="!mins.src" class="w-src" label="出处" tone="green" draggable minimizable dock enter body-class="srcbody" @minimize="mins.src = true">
-          <template #bar><span class="cntb">{{ registry.length }} 条</span></template>
-          <p v-if="!registry.length" class="muted small">还没有引用。陈老师回答时引用的资料会按顺序列在这里。</p>
-          <ol v-else class="srcs">
-            <li v-for="(c, i) in registry" :key="c.id"><button type="button" class="src" @click="openCite(c, i + 1)"><span class="n">[{{ i + 1 }}]</span><span class="t">{{ c.title }}</span><span class="k">{{ c.sourceUrl ? '公开资料' : '案例条件' }}</span></button></li>
-          </ol>
-        </Win>
-      </div>
-
-      <!-- 输入栏：桌面在通话窗下方，手机固定在底部 -->
+      <!-- 输入栏（固定）：桌面在老师区下方，手机在屏幕底部 -->
       <div class="composer no-print">
         <div v-if="stage === 'practice'" class="modes" role="radiogroup" aria-label="发给谁">
           <label :class="{ on: mode === 'negotiate' }"><input type="radio" value="negotiate" v-model="mode" />对买家说</label>
           <label :class="{ on: mode === 'ask' }"><input type="radio" value="ask" v-model="mode" />问老师（不计入谈判）</label>
         </div>
-        <div class="chips" aria-label="建议">
+        <div id="learn-chips" class="chips" :class="{ open: chipsOpen }" aria-label="建议">
           <button v-for="q in (negotiating ? DEAL : SUGGEST)" :key="q" type="button" class="px-chip" :disabled="paused || ended || !state.session" @click="suggest(q)">{{ q }}</button>
         </div>
         <div class="inrow">
+          <button type="button" class="chipbtn" :class="{ on: chipsOpen }" :aria-expanded="chipsOpen" aria-controls="learn-chips" @click="chipsOpen = !chipsOpen">{{ negotiating ? '示例' : '常见问题' }}<svg class="caret2" :class="{ up: !chipsOpen }" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" /></svg></button>
           <textarea ref="inputEl" v-model="input" rows="1" maxlength="1500" :placeholder="typedPh || ' '" :disabled="paused || ended || !state.session" aria-label="输入框" @keydown="onKey"></textarea>
           <button class="px-btn is-pink send" :disabled="!canSend" @click="send">发送<span class="arr" aria-hidden="true">→</span></button>
         </div>
       </div>
     </div>
-
-    <!-- 反馈窗：从底部升起 -->
-    <Transition name="sheet">
-      <div v-if="fbShow" class="fbwrap">
-        <Win class="fbwin" label="反馈 · 方案核算" tone="pink" minimizable dock body-class="fbbody" @minimize="fbMin = true">
-          <div class="fstrip">
-            <div class="fact"><b>{{ chk?.valid ? chk.grossMarginText : '—' }}</b><span>毛利率</span></div>
-            <div class="fact"><b>{{ chk?.valid ? fmtNum(chk.grossProfit) : '—' }}</b><span>美元毛利</span></div>
-            <div class="fact"><b>{{ okCount(chk?.seller) }}</b><span>卖方条件</span></div>
-            <div class="fact"><b>{{ okCount(chk?.buyer) }}</b><span>买家条件</span></div>
-            <div class="fact"><b>{{ observed }}</b><span>表达观察</span></div>
-          </div>
-          <div class="fbgrid">
-            <div>
-              <h3>{{ chk?.agreement ? '双方条件都满足，达成本练习目标' : '还没有达成本练习目标' }}</h3>
-              <p v-if="chk?.valid" class="small">销售收入 {{ chk.revenue }} 美元，总成本 {{ chk.cost }} 美元，毛利 {{ chk.grossProfit }} 美元；毛利率 {{ chk.grossMarginText }}，成本加成率 {{ chk.costMarkupText }}。</p>
-              <p v-if="state.check?.studentMarginError" class="pill" :class="state.check.studentMarginError === 'none' ? 'ok' : 'amber'">{{ marginErrText[state.check.studentMarginError] }}</p>
-              <h4>没达到的地方</h4>
-              <p v-if="!misses.length" class="small">都达到了。可以重新谈一次，试试别的说法。</p>
-              <ul class="miss">
-                <li v-for="m in misses" :key="m.k"><span>{{ m.t }}</span>
-                  <button class="px-btn" :disabled="busy || paused" @click="m.how === 'retry' ? startRetry() : againDeal()">{{ m.how === 'retry' ? '练这一项' : '再谈一次' }}</button></li>
-              </ul>
-            </div>
-            <div>
-              <h4>表达建议（附你的原话）</h4>
-              <p v-if="!feedback" class="muted small"><TypingBubble who="陈老师" /> 正在根据你的对话写建议</p>
-              <p v-else-if="feedback.status === 'error'" class="pill red">建议暂时没写出来，客观核算不受影响。</p>
-              <template v-else>
-                <div v-for="d in feedback.dimensions" :key="d.id" class="dim">
-                  <b>{{ d.name }}</b> <span class="pill" :class="d.status === 'observed' ? 'ok' : 'grey'">{{ d.status === 'observed' ? '观察到' : '未观察到' }}</span>
-                  <blockquote v-if="d.quote">“{{ d.quote }}”</blockquote>
-                  <p class="small">{{ plain(d.comment) }} <span class="muted">建议：{{ plain(d.suggestion) }}</span></p>
-                </div>
-                <p class="small">{{ plain(feedback.summary) }}</p>
-              </template>
-            </div>
-          </div>
-          <div class="row fbbtns">
-            <button class="px-btn is-pink" :disabled="busy || paused" @click="startRetry">练我没掌握的部分</button>
-            <button class="px-btn" :disabled="busy" @click="againDeal">重新谈一次</button>
-            <RouterLink to="/report" class="px-btn">查看学习报告</RouterLink>
-          </div>
-        </Win>
-      </div>
-    </Transition>
-
-    <!-- 手机：出处底部抽屉 -->
-    <Transition name="sheet">
-      <div v-if="srcSheet" class="srcsheet-scrim" @click.self="srcSheet = false">
-        <Win class="srcsheet" label="出处" tone="green" closable body-class="srcbody" @close="srcSheet = false">
-          <p v-if="!registry.length" class="muted small">还没有引用。陈老师回答时引用的资料会按顺序列在这里。</p>
-          <ol v-else class="srcs">
-            <li v-for="(c, i) in registry" :key="c.id"><button type="button" class="src" @click="openCite(c, i + 1)"><span class="n">[{{ i + 1 }}]</span><span class="t">{{ c.title }}</span><span class="k">{{ c.sourceUrl ? '公开资料' : '案例条件' }}</span></button></li>
-          </ol>
-        </Win>
-      </div>
-    </Transition>
-
-    <Dock :items="dockItems" @restore="restore" />
-    <CitationDrawer />
   </main>
 </template>
 
 <style scoped>
-.learn { max-width: 1480px; margin: 0 auto; padding: 4px 24px 40px; }
-.classbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px 24px; padding: 2px 4px 0; flex-wrap: wrap; }
-.classbar__t { display: grid; gap: 4px; padding-bottom: 10px; } .classbar__t h1 { font-size: clamp(24px, 2.4vw, 32px); margin: 0; line-height: 1.15; }
+/* ---------------- 桌面：整页正好占满视口，只有对话区滚动 ---------------- */
+.learn { max-width: 1480px; margin: 0 auto; padding: 0 24px 16px; height: calc(100dvh - var(--nav-h, 70px)); display: flex; flex-direction: column; }
+.classbar { flex: none; display: flex; justify-content: space-between; align-items: flex-end; gap: 12px 24px; padding: 0 4px; flex-wrap: wrap; }
+.classbar__t { display: grid; gap: 2px; padding-bottom: 8px; } .classbar__t h1 { font-size: clamp(22px, 2.2vw, 30px); margin: 0; line-height: 1.15; }
 .steps { padding-right: 18px; }
-.main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(360px, 2fr); grid-template-areas: "call stack" "comp stack"; grid-template-rows: auto 1fr; gap: 18px 22px; align-items: start; border: 1px solid var(--line); background: var(--white) var(--sky) center bottom / 1200px auto repeat-x; padding: 20px; box-shadow: var(--shadow-lg); position: relative; }
-.callcol { grid-area: call; min-width: 0; }
+.main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 460px); grid-template-areas: "call side" "comp side"; grid-template-rows: minmax(0, 1fr) auto; gap: 14px 20px; border: 1px solid var(--line); background: var(--white) var(--sky) center bottom / 1200px auto repeat-x; padding: 16px; box-shadow: var(--shadow-lg); position: relative; }
+.callcol { grid-area: call; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.callcol :deep(.call) { flex: 1; min-height: 0; }
+.side { grid-area: side; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
 .composer { grid-area: comp; }
-.stack { grid-area: stack; position: sticky; top: 78px; height: calc(100vh - 100px); min-height: 560px; display: flex; flex-direction: column; gap: 14px; }
-.mtabs { display: none; }
-.vnote { margin: 8px 2px 0; color: var(--muted); }
+.vnote { margin: 6px 2px 0; color: var(--muted); flex: none; }
 
 /* 通话控制按钮 */
 .cb { flex: 1 1 0; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 46px; padding: 0 8px; border: 0; border-right: 1px solid var(--line); background: transparent; font-size: 14px; box-shadow: none; }
@@ -471,18 +481,29 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
 .cb:disabled { border-style: solid !important; border-width: 0 1px 0 0 !important; }
 .cb.end { background: var(--pink); } .cb.end:hover:not(:disabled) { background: var(--pink-2); } .cb.end svg { fill: currentColor; stroke: none; }
 
-/* 右侧窗口栈 */
-.stack :deep(.win) { box-shadow: var(--shadow); }
-.w-task { flex: 0 1 auto; max-height: 56%; }
-.w-task :deep(.taskbody) { overflow-y: auto; padding: 16px 18px; }
-.w-chat { flex: 1 1 0; min-height: 220px; }
+/* 面板按钮条 */
+.tools { flex: none; display: flex; gap: 8px; flex-wrap: wrap; }
+.tool { position: relative; display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px; font-size: 13px; background: var(--white); border: 1px solid var(--ink); box-shadow: 2px 2px 0 var(--ink); text-decoration: none; color: var(--ink); font-family: var(--pixel); white-space: nowrap; }
+.tool i { width: 9px; height: 9px; background: var(--ink); flex: none; }
+.tool.t-orange i { background: var(--orange); } .tool.t-green i { background: var(--green-d); } .tool.t-pink i { background: var(--pink); }
+.tool .cnt { font-size: 12px; color: var(--muted); }
+.tool.on { background: var(--ink); color: #fff; box-shadow: none; transform: translate(2px, 2px); } .tool.on .cnt { color: var(--pink-l); }
+.tool .dot { position: absolute; top: -4px; right: -4px; width: 9px; height: 9px; background: var(--pink); border: 1px solid var(--ink); }
+.tool.t-home { margin-left: auto; display: none; }
+
+/* 展开的面板：在对话栏上方，最多占一半多，自己滚动 */
+.panel { flex: 0 1 auto; max-height: 62%; min-height: 0; box-shadow: var(--shadow); }
+.panel :deep(.panelbody) { overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px; min-height: 0; }
+.p-fb :deep(.panelbody) { padding: 0 0 14px; }
+.pop-enter-active { transition: transform .3s var(--ease), opacity .2s; } .pop-leave-active { transition: opacity .15s; }
+.pop-enter-from { transform: translateY(-10px); opacity: 0; } .pop-leave-to { opacity: 0; }
+
+.w-chat { flex: 1 1 0; min-height: 140px; box-shadow: var(--shadow); }
 .w-chat :deep(.chatbody) { padding: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.w-src { flex: 0 0 auto; max-height: 26%; }
-.w-src :deep(.srcbody) { overflow-y: auto; padding: 10px 12px; }
 .cntb { font: 400 12px/1 var(--pixel); color: var(--text-2); white-space: nowrap; }
 
 .task { display: grid; gap: 10px; overflow-wrap: anywhere; }
-.task h2 { font-size: 24px; margin: 0; }
+.task h2 { font-size: 22px; margin: 0; }
 .task p { margin: 0; }
 .goals { margin: 0; padding-left: 20px; display: grid; gap: 2px; }
 .alert { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; background: var(--pink-xl); border: 1px solid var(--ink); }
@@ -496,20 +517,20 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
 .example { display: flex; flex-wrap: wrap; gap: 4px 16px; background: var(--paper); border: 1px dashed var(--line); padding: 10px 12px; font-size: 13px; }
 .example b { width: 100%; font: 400 13px/1.4 var(--pixel); }
 .facts3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--line); }
-.facts3 .fact { flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 12px; border-right: 1px solid var(--line); white-space: normal; }
-.facts3 .fact:last-child { border-right: 0; } .facts3 .fact b { font-size: 26px; }
+.facts3 .fact { flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 10px; border-right: 1px solid var(--line); white-space: normal; }
+.facts3 .fact:last-child { border-right: 0; } .facts3 .fact b { font-size: 22px; } .facts3 .fact span { font-size: 12px; }
 .kv { border-collapse: collapse; table-layout: fixed; width: 100%; border: 1px solid var(--line); word-break: break-word; }
 .kv th { text-align: left; color: var(--text-2); font-weight: 400; padding: 6px 8px; background: var(--paper); border: 1px solid var(--hair); font-size: 12.5px; } .kv td { padding: 6px 8px; border: 1px solid var(--hair); }
-.offer { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: end; }
+.offer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: end; }
 .offer label { display: grid; gap: 4px; font: 400 13px/1.3 var(--pixel); color: var(--text-2); min-width: 0; }
 .offer input, .offer textarea { width: 100%; min-width: 0; font-family: var(--sans); }
 .offer .wide { grid-column: 1 / -1; } .chk { display: inline-flex !important; gap: 6px; margin-right: 14px; color: var(--ink) !important; }
 fieldset { border: 1px solid var(--line); } legend { font: 400 13px/1 var(--pixel); }
-.reason { white-space: normal; } .q { font-size: 17px; line-height: 1.6; color: var(--ink); font-weight: 600; }
+.reason { white-space: normal; } .q { font-size: 16px; line-height: 1.6; color: var(--ink); font-weight: 600; }
 hr { border: 0; border-top: 1px dashed var(--line); margin: 6px 0; width: 100%; }
 
 /* 对话 */
-.log { flex: 1; overflow-y: auto; padding: 14px; display: grid; gap: 14px; align-content: start; }
+.log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px; display: grid; gap: 14px; align-content: start; }
 .msg { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; animation: rise .32s var(--ease) both; }
 .msg .who { color: var(--muted); font: 400 12px/1.2 var(--pixel); }
 @keyframes rise { from { transform: translateY(14px) scale(.98); opacity: 0; } to { transform: none; opacity: 1; } }
@@ -530,6 +551,10 @@ hr { border: 0; border-top: 1px dashed var(--line); margin: 6px 0; width: 100%; 
 .src { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; text-align: left; padding: 7px 10px; font-size: 13px; box-shadow: none; }
 .src .n { color: #c4153a; } .src .t { font-family: var(--sans); font-size: 14px; color: var(--ink); } .src .k { font-size: 12px; color: var(--muted); }
 .src:hover { background: var(--mint) !important; }
+.srcs li.open .src { background: var(--mint); }
+.srcd { border: 1px solid var(--line); border-top: 0; padding: 10px 12px; display: grid; gap: 8px; background: var(--white); }
+.srcd .text { white-space: pre-wrap; margin: 0; font-size: 14px; } .srcd p { margin: 0; }
+.srcd blockquote { margin: 0; font-size: 13px; }
 
 /* 输入栏 */
 .composer { display: grid; gap: 10px; padding: 12px; background: var(--paper); border: 1px solid var(--line); box-shadow: var(--shadow); }
@@ -539,78 +564,68 @@ hr { border: 0; border-top: 1px dashed var(--line); margin: 6px 0; width: 100%; 
 .modes label.on { background: var(--ink); color: #fff; }
 .modes input { position: absolute; opacity: 0; pointer-events: none; }
 .modes label:has(input:focus-visible) { outline: 2px solid var(--pink); outline-offset: 2px; }
+.chips { flex-wrap: wrap; } /* 换行排列，不横向滑动 */
+.chips .px-chip { white-space: normal; text-align: left; max-width: 100%; }
+.chipbtn { display: none; }
 .inrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: stretch; }
 .inrow textarea { resize: none; min-height: 48px; font-size: 15px; line-height: 1.5; padding: 12px; }
 .send { height: auto; min-height: 48px; }
 
-/* 反馈窗 */
-.fbwrap { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1800; display: flex; justify-content: center; padding: 0 24px; pointer-events: none; }
-.fbwin { pointer-events: auto; width: min(1180px, 100%); max-height: min(78vh, 760px); box-shadow: 0 -8px 0 0 var(--ink), 8px 0 0 0 var(--ink) !important; border-bottom: 0; }
-.fbwin :deep(.fbbody) { overflow-y: auto; padding: 0 0 16px; }
-.fstrip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-bottom: 1px solid var(--line); background: var(--paper); }
-.fstrip .fact { justify-content: center; padding: 16px 8px; border-right: 1px solid var(--line); }
-.fstrip .fact:last-child { border-right: 0; }
-.fbgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 16px 22px 0; }
-.fbgrid h3 { font-size: 22px; } .fbgrid h4 { margin: 14px 0 6px; font: 400 14px/1.3 var(--pixel); color: var(--ink); }
-.fbgrid p { margin: 6px 0; }
+/* 反馈 */
+.fstrip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; border-bottom: 1px solid var(--line); background: var(--line); }
+.fstrip .fact { flex-direction: column; align-items: center; gap: 2px; padding: 10px 4px; background: var(--paper); white-space: normal; text-align: center; } .fstrip .fact b { font-size: 20px; } .fstrip .fact span { font-size: 12px; }
+.fbgrid { display: grid; gap: 4px; padding: 12px 16px 0; }
+.fbgrid h3 { font-size: 20px; margin: 0; } .fbgrid h4 { margin: 12px 0 4px; font: 400 14px/1.3 var(--pixel); color: var(--ink); }
+.fbgrid p { margin: 4px 0; } .fbgrid .pill { justify-self: start; }
 .miss { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .miss li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); background: var(--white); font-size: 14px; }
-.miss .px-btn { min-height: 34px; padding: 0 12px; font-size: 13px; flex: none; }
-.dim { border: 1px solid var(--line); padding: 10px 12px; margin-top: 8px; background: var(--white); }
+.miss .px-btn { min-height: 32px; padding: 0 12px; font-size: 13px; flex: none; }
+.dim { border: 1px solid var(--line); padding: 10px 12px; margin-top: 6px; background: var(--white); }
 blockquote { margin: 8px 0; padding: 8px 12px; background: var(--butter); border-left: 3px solid var(--ink); font-family: var(--serif); }
-.fbbtns { padding: 16px 22px 0; }
-.sheet-enter-active { transition: transform .45s var(--ease), opacity .3s; } .sheet-leave-active { transition: transform .3s ease, opacity .25s; }
-.sheet-enter-from, .sheet-leave-to { transform: translateY(100%); opacity: 0; }
-.srcsheet-scrim { display: none; }
+.fbbtns { padding: 14px 16px 0; }
 .is-paused .task { opacity: .75; }
 
-@media (max-width: 1360px) { .main { grid-template-columns: minmax(0, 1fr) minmax(340px, 400px); } .offer { grid-template-columns: 1fr 1fr; } }
-
-/* ---------------- 手机 / 平板：通话吸顶，标签切换，输入栏固定在底部 ---------------- */
+/* ---------------- 手机 / 平板：老师区顶部固定，输入栏底部固定，中间对话区独立滚动 ---------------- */
 @media (max-width: 1099px) {
-  .learn { padding: 0 0 calc(132px + env(safe-area-inset-bottom)); }
+  .learn { position: fixed; left: 0; right: 0; top: var(--vvt, 0px); height: var(--vvh, 100dvh); max-width: none; padding: 0; z-index: 10; background: var(--paper); }
   .classbar { display: none; }
-  .main { display: block; border: 0; box-shadow: none; padding: 0; background: var(--paper); }
-  .callcol { position: sticky; top: 0; z-index: 30; background: var(--paper); padding: 6px 8px 0; }
-  .callsticky { max-width: 640px; margin: 0 auto; }
+  .main { display: flex; flex-direction: column; border: 0; box-shadow: none; padding: 0; gap: 0; background: var(--paper); }
+  .callcol { flex: none; padding: max(6px, env(safe-area-inset-top)) 8px 0; z-index: 3; background: var(--paper); }
+  .callcol :deep(.call) { flex: none; max-width: 640px; width: 100%; margin: 0 auto; }
   .vnote { display: none; }
   .cb { height: 40px; font-size: 13px; gap: 5px; }
-  .mtabs { display: grid; grid-template-columns: repeat(3, 1fr); position: sticky; top: var(--call-h, 0px); z-index: 29; margin: 8px 8px 0; border: 1px solid var(--line); background: var(--white); box-shadow: 3px 3px 0 var(--ink); }
-  .mtabs button { position: relative; height: 40px; border: 0; background: var(--paper); font-size: 14px; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; gap: 6px; box-shadow: none; }
-  .mtabs button + button { border-left: 1px solid var(--line); }
-  .mtabs button.on { background: var(--ink); color: #fff; } .mtabs button.on .cnt { color: var(--pink-l); }
-  .mtabs .cnt { font-size: 12px; color: var(--muted); }
-  .mtabs .dot { width: 8px; height: 8px; background: var(--pink); }
-  .stack { position: static; height: auto; min-height: 0; display: block; padding: 10px 8px 0; }
-  .stack :deep(.win) { box-shadow: 3px 3px 0 var(--ink); transform: none !important; animation: none; }
-  .stack :deep(.bar) { display: none; }
-  .w-src { display: none !important; }
-  .m-off { display: none !important; }
-  .w-task, .w-chat { max-height: none; }
-  .w-chat { min-height: calc(100dvh - var(--call-h, 280px) - 190px); }
-  .w-chat :deep(.chatbody) { overflow: visible; }
-  .log { overflow: visible; padding: 12px 10px; }
-  .composer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; gap: 8px; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); border: 0; border-top: 1px solid var(--line); box-shadow: 0 -3px 0 rgba(20,2,6,.08); }
-  .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 0 2px 3px; } .chips::-webkit-scrollbar { display: none; } .px-chip { flex: none; }
-  .inrow textarea { min-height: 44px; padding: 10px; }
-  .send { min-height: 44px; padding: 0 14px; }
+  .side { flex: 1 1 0; min-height: 0; gap: 8px; padding: 8px 8px 8px; position: relative; z-index: 1; }
+  .tools { gap: 6px; flex-wrap: nowrap; }
+  .tool { height: 32px; padding: 0 10px; }
+  .tool .cnt-l { display: none; }
+  .tool.t-home { display: inline-flex; }
+  .panel { max-height: 72%; box-shadow: 3px 3px 0 var(--ink); }
+  .panel :deep(.panelbody) { padding: 12px; }
+  .w-chat { min-height: 90px; box-shadow: 3px 3px 0 var(--ink); }
+  .w-chat :deep(.bar) { display: none; }
+  .log { padding: 12px 10px; gap: 12px; }
+  .composer { flex: none; gap: 8px; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); border: 0; border-top: 1px solid var(--line); box-shadow: 0 -3px 0 rgba(20,2,6,.08); z-index: 2; }
+  .chips { display: none; } .chips.open { display: flex; }
+  .chips .px-chip { font-size: 13px; padding: 7px 10px; }
+  .inrow { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; }
+  .chipbtn { display: inline-flex; align-items: center; gap: 4px; padding: 0 9px; font-size: 13px; box-shadow: 2px 2px 0 var(--ink); }
+  .chipbtn.on { background: var(--ink); color: #fff; box-shadow: none; }
+  .caret2 { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.6; transition: transform .2s; } .caret2.up { transform: rotate(180deg); }
+  .inrow textarea { min-height: 44px; padding: 10px; font-size: 16px; }
+  .inrow textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .send { min-height: 44px; padding: 0 12px; }
+  .send .arr { display: none; }
   .modes label { padding: 5px 9px; font-size: 12px; }
-  .fbwrap { padding: 0; z-index: 1900; }
-  .fbwin { max-height: 86dvh; box-shadow: 0 -6px 0 0 var(--ink) !important; border-left: 0; border-right: 0; }
-  .fstrip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .fstrip .fact { flex-direction: column; align-items: center; gap: 2px; padding: 10px 4px; border-bottom: 1px solid var(--line); white-space: normal; text-align: center; }
-  .fbgrid { grid-template-columns: 1fr; gap: 6px; padding: 12px 14px 0; }
-  .fbbtns { padding: 14px 14px 0; }
-  .srcsheet-scrim { display: flex; position: fixed; inset: 0; z-index: 2400; align-items: flex-end; background: rgba(20,2,6,.28); }
-  .srcsheet { width: 100%; max-height: 70dvh; border-left: 0; border-right: 0; box-shadow: 0 -6px 0 0 var(--ink); }
-  .srcsheet :deep(.srcbody) { overflow-y: auto; }
+  .p-fb :deep(.panelbody) { padding: 0 0 12px; }
+  .fstrip { grid-template-columns: repeat(3, minmax(0, 1fr)); } .fstrip .fact:last-child { grid-column: span 2; }
+  .fbgrid { padding: 10px 12px 0; } .fbbtns { padding: 12px 12px 0; }
 }
+@media (min-width: 1100px) and (max-width: 1360px) { .main { grid-template-columns: minmax(0, 1fr) minmax(340px, 400px); } .fstrip { grid-template-columns: repeat(3, minmax(0, 1fr)); } .fstrip .fact:last-child { grid-column: span 2; } }
 @media (max-width: 600px) {
-  .offer { grid-template-columns: 1fr 1fr; }
-  .facts3 .fact { padding: 8px; } .facts3 .fact b { font-size: 20px; } .facts3 .fact span { font-size: 12px; }
-  .cb { height: 40px; padding: 0 4px; gap: 4px; } .cb svg { width: 14px; height: 14px; }
+  .cb { height: 38px; padding: 0 4px; gap: 4px; } .cb svg { width: 14px; height: 14px; }
   .miss li { flex-direction: column; align-items: stretch; }
-  .task h2 { font-size: 21px; }
+  .task h2 { font-size: 20px; }
+  .facts3 .fact { padding: 8px; } .facts3 .fact b { font-size: 19px; }
 }
 @media print { .learn { display: none; } }
 </style>

@@ -59,7 +59,7 @@
         "minimumLeadDays": 18,
         "maximumLeadDays": 21,
         "openingBuyerMessage": "我们需要 500 件样品，希望价格有竞争力，也关心首付款和交货时间。请给出你的初步方案。",
-        "task": "与模拟买家沟通后提交完整最终方案。服务端会分别检查卖方条件、买方条件和表达依据；聊天中说成交不代表规则已通过。",
+        "task": "与海外买家沟通后提交完整最终方案。服务端会分别检查卖方条件、买方条件和表达依据；聊天中说成交不代表规则已通过。",
         "suggestedDialogueRounds": {"minimum": 4, "maximum": 6},
         "factIds": ["F-QUOTE-01", "F-TERMS-02", "F-TALK-03"]
       },
@@ -69,7 +69,7 @@
         "buyerMaximumLeadDays": 21,
         "buyerRequiredQuantity": 500,
         "rolePolicy": "买家可表示价格、首付款或交期不满足条件并要求调整，不逐字透露隐藏阈值，不替学生写最优方案。协议通过与否由规则引擎决定，不采信模型的成交声明。",
-        "executionPolicy": "隐藏阈值仅由代码比较。买家语言模型只接收当前方案的粗粒度可接受/需调整标签与对话，不直接接收阈值数值；最终报告可披露本模拟案例的规则核算。",
+        "executionPolicy": "隐藏阈值仅由代码比较。买家语言模型只接收当前方案的粗粒度可接受/需调整标签与对话，不直接接收阈值数值；最终报告可披露本练习案例的规则核算。",
         "exampleFinalOffer": {
           "unitPriceCents": 1250,
           "quantity": 500,

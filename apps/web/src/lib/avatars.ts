@@ -11,7 +11,7 @@ export const AVATARS = {
  },
  "buyer": {
   "name": "Markus Weber",
-  "title": "模拟买家 · 德国进口商采购经理",
+  "title": "海外买家 · 德国进口商采购经理",
   "voice": "男声 · 云健",
   "mouth": {
    "src": "buyer-mouth.png",

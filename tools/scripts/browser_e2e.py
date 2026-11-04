@@ -126,7 +126,7 @@ async def main():
         await wait_speech_idle(40)
         # 7 买家磋商
         await page.click('button:has-text("开始买方谈判")'); await asyncio.sleep(1)
-        check('role switched to buyer', await page.locator('text=当前角色：模拟买家').count() > 0)
+        check('role switched to buyer', await page.locator('text=当前角色：海外买家').count() > 0)
         for m in ['您好，我们报价每件 13.5 美元，500 件，首付款 30%，20 天交货。', '我理解您担心价格。我们的单位成本是 10 美元，13.5 美元的毛利率也只有约 26%。我可以降到 12.8 美元。', '那就 12.5 美元一件、首付款 30%、20 天交货，这是我们最好的条件了。']:
             await page.fill('textarea', m); await page.keyboard.press('Enter'); await wait_idle(); await asyncio.sleep(0.5)
         await shot('08-negotiation')

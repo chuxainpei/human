@@ -66,7 +66,7 @@ const who = computed(() => (shown.value === 'buyer' ? 'Markus Weber' : '陈老�
         <img class="patch" :src="base + a.mouth.src" :style="{ ...pos(a.mouth), opacity: mouth }" alt="" draggable="false" />
       </div>
       <div class="scan" aria-hidden="true"></div>
-      <div class="name"><b>{{ a.name }}</b><span>{{ shown === 'buyer' ? '模拟买家' : '经管课老师' }}</span></div>
+      <div class="name"><b>{{ a.name }}</b><span>{{ shown === 'buyer' ? '海外买家' : '经管课老师' }}</span></div>
       <p v-if="subtitle" class="cc" aria-live="off">{{ subtitle }}</p>
       <div v-if="phase === 'thinking'" class="think" aria-hidden="true"><i></i><i></i><i></i></div>
       <Transition name="pip">
@@ -104,8 +104,13 @@ const who = computed(() => (shown.value === 'buyer' ? 'Markus Weber' : '陈老�
 .live i { width: 7px; height: 7px; background: var(--green); animation: blinkSq 1s steps(1, end) infinite; }
 .is-error .live i { background: #9a948c; animation: none; }
 @keyframes blinkSq { 50% { opacity: 0; } }
-.screen { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: #2a2420; isolation: isolate; }
+.call { min-height: 0; }
+/* 画面区：桌面填满老师区剩余高度；形象层始终保持原图比例并“覆盖”画面，眨眼/口型贴片不会错位 */
+.screen { position: relative; flex: 1; min-height: 200px; overflow: hidden; background: #2a2420; isolation: isolate; container-type: size; }
 .frame { position: absolute; inset: 0; transform-origin: 50% 40%; will-change: transform; transition: opacity .24s ease; }
+@supports (width: 1cqw) {
+  .frame { inset: auto; left: 50%; top: 50%; width: max(100cqw, 179.17cqh); height: max(100cqh, 55.81cqw); margin-left: calc(max(100cqw, 179.17cqh) / -2); margin-top: calc(max(100cqh, 55.81cqw) / -2); }
+}
 .fading .frame { opacity: 0; }
 .base, .patch { position: absolute; display: block; user-select: none; pointer-events: none; }
 .base { inset: 0; width: 100%; height: 100%; object-fit: cover; }
@@ -135,6 +140,7 @@ const who = computed(() => (shown.value === 'buyer' ? 'Markus Weber' : '陈老�
 .lt-idle.on i { background: #2b6cb0; } .lt-thinking.on i { background: var(--orange); animation: blinkSq .5s steps(1, end) infinite; } .lt-speaking.on i { background: var(--green); animation: blinkSq .35s steps(1, end) infinite; }
 @media (max-width: 1099px) {
   .call { box-shadow: none; animation: none; }
+  .screen { flex: none; min-height: 0; height: clamp(180px, 31dvh, 300px); }
   .bar { height: 26px; }
   .cc { bottom: 10px; font-size: 14px; max-width: 92%; padding: 5px 10px; }
   .name b { font-size: 14px; padding: 1px 8px; } .name span { display: none; }

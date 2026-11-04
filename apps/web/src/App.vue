@@ -50,7 +50,7 @@ const focus = computed(() => route.path === '/learn')
 </template>
 <style scoped>
 .announce { position: relative; }
-@media (max-width: 1099px) { .nav.is-focus { position: relative; } }
+@media (max-width: 1099px) { .nav.is-focus { display: none; } }
 .more { margin-left: 6px; font-weight: 600; }
 .x { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; padding: 0; display: grid; place-items: center; background: transparent; border: 1px solid var(--ink); }
 .x svg { width: 10px; height: 10px; stroke: var(--ink); stroke-width: 1.4; }

@@ -77,7 +77,7 @@ const observed = computed(() => (rep.value?.feedback?.dimensions ? `${rep.value.
             <template v-if="rep.check?.valid">
               <p>销售收入 {{ rep.check.revenue }} 美元；总成本 {{ rep.check.cost }} 美元；毛利 {{ rep.check.grossProfit }} 美元；毛利率 {{ rep.check.grossMarginText }}（成本加成率 {{ rep.check.costMarkupText }}）。</p>
               <p v-if="rep.studentMarginError" class="small">你填的毛利率：{{ rep.finalOffer.studentGrossMarginPercent ?? '未填' }}{{ rep.finalOffer.studentGrossMarginPercent !== null ? '%' : '' }} → {{ marginErrText[rep.studentMarginError] }}</p>
-              <table class="t"><thead><tr><th>条件</th><th>卖方规则</th><th>卖方</th><th>模拟买家</th></tr></thead><tbody>
+              <table class="t"><thead><tr><th>条件</th><th>卖方规则</th><th>卖方</th><th>海外买家</th></tr></thead><tbody>
                 <tr v-for="(c, i) in rep.check.seller.checks" :key="c.field"><td>{{ fieldName[c.field] }}</td><td>{{ c.rule }}</td><td>{{ c.ok ? '✓' : '✗' }}</td><td>{{ rep.check.buyer.checks[i].ok ? '✓' : '✗' }} <span class="muted">{{ rep.check.buyer.checks[i].rule }}</span></td></tr>
               </tbody></table>
               <p>符合卖方条件：<b>{{ rep.check.seller.pass ? '是' : '否' }}</b>；符合买家条件：<b>{{ rep.check.buyer.pass ? '是' : '否' }}</b>；达成本练习目标：<b>{{ rep.check.agreement ? '是' : '否' }}</b></p>

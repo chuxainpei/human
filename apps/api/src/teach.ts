@@ -87,7 +87,7 @@ export function buildBuyer(c: CoursePack, s: Session, studentText: string, stric
   const rounds = s.practice.rounds
   const dialog: Msg[] = s.turns.filter((t) => t.stage === 'practice' && (t.role === 'buyer' || t.role === 'student'))
     .slice(-10).map((t) => ({ role: t.role === 'student' ? 'user' : 'assistant', content: t.text }))
-  const sys = `你扮演一位海外进口商的采购经理（模拟买家），正在和学生扮演的中国出口商磋商 500 件“无品牌教学样品”的出口报价。这是虚构课堂案例。
+  const sys = `你扮演一位海外进口商的采购经理（海外买家），正在和学生扮演的中国出口商磋商 500 件“无品牌教学样品”的出口报价。这是虚构课堂案例。
 要求：
 - 你只是买家，不是老师，不评价学生学得好坏，不讲解公式，不替对方写方案。
 - 用简体中文口语，每次 2–4 句，像真实谈判。
@@ -115,7 +115,7 @@ export function buildFeedback(c: CoursePack, s: Session) {
   const k = c.cases[0]
   const lines = s.turns.filter((t) => t.stage === 'practice' && (t.role === 'student' || t.role === 'buyer')).map((t) => `${t.turnId}（${t.role === 'student' ? '学生' : '买家'}）：${t.text}`).join('\n')
   const fo = s.finalOffer!
-  const sys = `你是课程助教，根据下面一段真实的模拟磋商记录，按三个观察维度给出可核对的反馈。只能引用记录里学生（不是买家）的原话。
+  const sys = `你是课程助教，根据下面一段真实的磋商练习记录，按三个观察维度给出可核对的反馈。只能引用记录里学生（不是买家）的原话。
 观察维度（来自课程资料 F-TALK-03）：
 D1 解释报价依据：学生是否用案例数据（成本、毛利、交期安排等）解释为什么这样报价；
 D2 回应具体顾虑：买家提出顾虑后，学生是否针对该顾虑回应；
