@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // 学习页 v3：老师展示区与底部输入栏固定不动，只有对话内容滚动。
-// 桌面：左 = 通话大窗（字幕、打断/暂停/静音/结束、倾听/思考/讲话灯；磋商时买家画中画）+ 下方输入栏；
-//       右 = 只有对话栏。任务 / 出处 / 反馈 收成对话栏上方的小按钮，点开后在对话栏上方展开（再点或 × 收起）。
-// 手机：整页不滚动。老师区固定在顶部、输入栏固定在底部；任务 / 出处 / 反馈 只在中间对话区里展开，永远不盖住老师区。
+// 对话是重点。桌面：右侧大栏 = 对话 + 输入栏；左侧较窄 = 老师通话窗 + 任务 / 出处 / 反馈 小按钮（点开在老师窗下方展开，老师窗缩小但始终可见）。
+// 手机：整页不滚动。顶部一条紧凑的老师条（左画面、右控制），下面整块都是对话，输入栏固定在底部；
+//       任务 / 出处 / 反馈 在老师条和对话之间展开，永远不盖住老师区。
 //       常见问题收进输入框左边的按钮，点开后换行排列，不再横向滑动。
 import { fmtAnswer } from '../lib/format'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
@@ -233,7 +233,7 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
     </div>
 
     <div class="main">
-      <!-- 左 / 顶部：老师展示区（固定） -->
+      <!-- 左 / 顶部：老师展示区（固定）+ 任务 / 出处 / 反馈 小按钮，点开在老师区下方展开，不挤占对话 -->
       <section class="callcol" aria-label="视频通话">
         <CallStage :main="mainRole" :pip="pipRole" :phase="rigPhase" :level="speaker.level" :subtitle="subtitle" :reduced-motion="reduced" :paused="paused"
           :title="stage === 'practice' ? '情景磋商 · 三方通话' : '面对面课堂 · 陈老师'" :error-text="state.error ?? ''" @retry="clearError" @swap="swap">
@@ -243,10 +243,6 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
           <button class="cb end" :disabled="ended" title="结束本节课" @click="endLearning"><svg viewBox="0 0 24 24"><path d="M3 14c5-5 13-5 18 0l-2.5 2.5-3-2v-2.5c-2.3-.7-4.7-.7-7 0V14.5l-3 2z" /></svg><span>结束</span></button>
         </CallStage>
         <p v-if="state.voiceNote" class="vnote small">声音：{{ state.voiceNote }}，字幕照常显示。</p>
-      </section>
-
-      <!-- 右 / 中间：对话栏（只有这里滚动）。任务 / 出处 / 反馈 是上方的小按钮 -->
-      <section class="side" aria-label="对话">
         <div class="tools no-print" role="toolbar" aria-label="课堂面板">
           <button type="button" class="tool t-orange" :class="{ on: panel === 'task' }" :aria-expanded="panel === 'task'" @click="toggle('task')">
             <i></i>任务<span class="cnt">{{ stageIdx + 1 }}/{{ STAGES.length }}<span class="cnt-l"> · {{ STAGES[stageIdx].t }}</span></span><b v-if="!taskSeen" class="dot" aria-label="有新任务"></b>
@@ -419,6 +415,10 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
           </Win>
         </Transition>
 
+      </section>
+
+      <!-- 右 / 主体：对话栏 + 输入栏（对话是重点，占大部分宽度；只有对话内容滚动） -->
+      <section class="side" aria-label="对话">
         <Win class="w-chat" label="对话" tone="purple" body-class="chatbody">
           <template #bar><span class="cntb">{{ state.turns.length }} 条</span></template>
           <div ref="logEl" class="log" aria-live="polite">
@@ -440,23 +440,23 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
             </template>
           </div>
         </Win>
+        <!-- 输入栏（固定）：桌面在老师区下方，手机在屏幕底部 -->
+        <div class="composer no-print">
+          <div v-if="stage === 'practice'" class="modes" role="radiogroup" aria-label="发给谁">
+            <label :class="{ on: mode === 'negotiate' }"><input type="radio" value="negotiate" v-model="mode" />对买家说</label>
+            <label :class="{ on: mode === 'ask' }"><input type="radio" value="ask" v-model="mode" />问老师（不计入谈判）</label>
+          </div>
+          <div id="learn-chips" class="chips" :class="{ open: chipsOpen }" aria-label="建议">
+            <button v-for="q in (negotiating ? DEAL : SUGGEST)" :key="q" type="button" class="px-chip" :disabled="paused || ended || !state.session" @click="suggest(q)">{{ q }}</button>
+          </div>
+          <div class="inrow">
+            <button type="button" class="chipbtn" :class="{ on: chipsOpen }" :aria-expanded="chipsOpen" aria-controls="learn-chips" @click="chipsOpen = !chipsOpen">{{ negotiating ? '示例' : '常见问题' }}<svg class="caret2" :class="{ up: !chipsOpen }" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" /></svg></button>
+            <textarea ref="inputEl" v-model="input" rows="1" maxlength="1500" :placeholder="typedPh || ' '" :disabled="paused || ended || !state.session" aria-label="输入框" @keydown="onKey"></textarea>
+            <button class="px-btn is-pink send" :disabled="!canSend" @click="send">发送<span class="arr" aria-hidden="true">→</span></button>
+          </div>
+        </div>
       </section>
 
-      <!-- 输入栏（固定）：桌面在老师区下方，手机在屏幕底部 -->
-      <div class="composer no-print">
-        <div v-if="stage === 'practice'" class="modes" role="radiogroup" aria-label="发给谁">
-          <label :class="{ on: mode === 'negotiate' }"><input type="radio" value="negotiate" v-model="mode" />对买家说</label>
-          <label :class="{ on: mode === 'ask' }"><input type="radio" value="ask" v-model="mode" />问老师（不计入谈判）</label>
-        </div>
-        <div id="learn-chips" class="chips" :class="{ open: chipsOpen }" aria-label="建议">
-          <button v-for="q in (negotiating ? DEAL : SUGGEST)" :key="q" type="button" class="px-chip" :disabled="paused || ended || !state.session" @click="suggest(q)">{{ q }}</button>
-        </div>
-        <div class="inrow">
-          <button type="button" class="chipbtn" :class="{ on: chipsOpen }" :aria-expanded="chipsOpen" aria-controls="learn-chips" @click="chipsOpen = !chipsOpen">{{ negotiating ? '示例' : '常见问题' }}<svg class="caret2" :class="{ up: !chipsOpen }" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" /></svg></button>
-          <textarea ref="inputEl" v-model="input" rows="1" maxlength="1500" :placeholder="typedPh || ' '" :disabled="paused || ended || !state.session" aria-label="输入框" @keydown="onKey"></textarea>
-          <button class="px-btn is-pink send" :disabled="!canSend" @click="send">发送<span class="arr" aria-hidden="true">→</span></button>
-        </div>
-      </div>
     </div>
   </main>
 </template>
@@ -467,11 +467,11 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
 .classbar { flex: none; display: flex; justify-content: space-between; align-items: flex-end; gap: 12px 24px; padding: 0 4px; flex-wrap: wrap; }
 .classbar__t { display: grid; gap: 2px; padding-bottom: 8px; } .classbar__t h1 { font-size: clamp(22px, 2.2vw, 30px); margin: 0; line-height: 1.15; }
 .steps { padding-right: 18px; }
-.main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 460px); grid-template-areas: "call side" "comp side"; grid-template-rows: minmax(0, 1fr) auto; gap: 14px 20px; border: 1px solid var(--line); background: var(--white) var(--sky) center bottom / 1200px auto repeat-x; padding: 16px; box-shadow: var(--shadow-lg); position: relative; }
-.callcol { grid-area: call; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.callcol :deep(.call) { flex: 1; min-height: 0; }
-.side { grid-area: side; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
-.composer { grid-area: comp; }
+.main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(400px, 5fr) minmax(0, 7fr); grid-template-areas: "call side"; grid-template-rows: minmax(0, 1fr); gap: 20px; border: 1px solid var(--line); background: var(--white) var(--sky) center bottom / 1200px auto repeat-x; padding: 16px; box-shadow: var(--shadow-lg); position: relative; }
+.callcol { grid-area: call; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+.callcol :deep(.call) { flex: 1 1 auto; min-height: auto; } /* 不小于“画面 200px + 标题栏 + 控制栏”，面板再高也压不到按钮 */
+.side { grid-area: side; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.composer { flex: none; }
 .vnote { margin: 6px 2px 0; color: var(--muted); flex: none; }
 
 /* 通话控制按钮 */
@@ -492,13 +492,13 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
 .tool.t-home { margin-left: auto; display: none; }
 
 /* 展开的面板：在对话栏上方，最多占一半多，自己滚动 */
-.panel { flex: 0 1 auto; max-height: 62%; min-height: 0; box-shadow: var(--shadow); }
+.panel { flex: 0 1 auto; max-height: 60%; min-height: 0; box-shadow: var(--shadow); }
 .panel :deep(.panelbody) { overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px; min-height: 0; }
 .p-fb :deep(.panelbody) { padding: 0 0 14px; }
 .pop-enter-active { transition: transform .3s var(--ease), opacity .2s; } .pop-leave-active { transition: opacity .15s; }
 .pop-enter-from { transform: translateY(-10px); opacity: 0; } .pop-leave-to { opacity: 0; }
 
-.w-chat { flex: 1 1 0; min-height: 140px; box-shadow: var(--shadow); }
+.w-chat { flex: 1 1 0; min-height: 200px; box-shadow: var(--shadow); }
 .w-chat :deep(.chatbody) { padding: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .cntb { font: 400 12px/1 var(--pixel); color: var(--text-2); white-space: nowrap; }
 
@@ -530,13 +530,14 @@ fieldset { border: 1px solid var(--line); } legend { font: 400 13px/1 var(--pixe
 hr { border: 0; border-top: 1px dashed var(--line); margin: 6px 0; width: 100%; }
 
 /* 对话 */
-.log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px; display: grid; gap: 14px; align-content: start; }
+.log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px 20px; display: grid; gap: 14px; align-content: start; }
 .msg { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; animation: rise .32s var(--ease) both; }
 .msg .who { color: var(--muted); font: 400 12px/1.2 var(--pixel); }
 @keyframes rise { from { transform: translateY(14px) scale(.98); opacity: 0; } to { transform: none; opacity: 1; } }
-.bubble { overflow-wrap: anywhere; max-width: 100%; padding: 10px 13px; background: var(--paper); border: 1px solid var(--line); font-size: 15px; line-height: 1.7; }
+.bubble { overflow-wrap: anywhere; max-width: 100%; padding: 11px 15px; background: var(--paper); border: 1px solid var(--line); font-size: 16px; line-height: 1.75; }
 .m-teacher .bubble { background: var(--white); box-shadow: 3px 3px 0 0 var(--purple); }
-.m-student { justify-items: end; } .m-student .bubble { background: var(--pink-l); max-width: 88%; } .m-student .who { text-align: right; }
+.m-student { justify-items: end; } .m-student .bubble { background: var(--pink-l); max-width: 80%; }
+.m-teacher .bubble, .m-buyer .bubble { max-width: 92%; } .m-student .who { text-align: right; }
 .m-buyer .bubble { background: var(--butter); }
 .m-system .bubble { background: var(--paper-2); font-size: 13px; }
 .caret { display: inline-block; width: 2px; height: 1em; margin-left: 2px; vertical-align: -.12em; background: var(--pink); animation: blink 1s steps(1, end) infinite; } @keyframes blink { 50% { opacity: 0; } }
@@ -590,21 +591,22 @@ blockquote { margin: 8px 0; padding: 8px 12px; background: var(--butter); border
   .learn { position: fixed; left: 0; right: 0; top: var(--vvt, 0px); height: var(--vvh, 100dvh); max-width: none; padding: 0; z-index: 10; background: var(--paper); }
   .classbar { display: none; }
   .main { display: flex; flex-direction: column; border: 0; box-shadow: none; padding: 0; gap: 0; background: var(--paper); }
-  .callcol { flex: none; padding: max(6px, env(safe-area-inset-top)) 8px 0; z-index: 3; background: var(--paper); }
-  .callcol :deep(.call) { flex: none; max-width: 640px; width: 100%; margin: 0 auto; }
+  .callcol { display: contents; }
+  .callcol :deep(.call) { flex: none; margin: max(6px, env(safe-area-inset-top)) 8px 0; }
   .vnote { display: none; }
-  .cb { height: 40px; font-size: 13px; gap: 5px; }
-  .side { flex: 1 1 0; min-height: 0; gap: 8px; padding: 8px 8px 8px; position: relative; z-index: 1; }
-  .tools { gap: 6px; flex-wrap: nowrap; }
+  .tools { gap: 6px; flex-wrap: nowrap; margin: 8px 8px 0; }
   .tool { height: 32px; padding: 0 10px; }
   .tool .cnt-l { display: none; }
   .tool.t-home { display: inline-flex; }
-  .panel { max-height: 72%; box-shadow: 3px 3px 0 var(--ink); }
+  .panel { flex: none; max-height: 50dvh; margin: 8px 8px 0; box-shadow: 3px 3px 0 var(--ink); }
   .panel :deep(.panelbody) { padding: 12px; }
-  .w-chat { min-height: 90px; box-shadow: 3px 3px 0 var(--ink); }
+  .p-fb :deep(.panelbody) { padding: 0 0 12px; }
+  .side { flex: 1 1 0; min-height: 0; gap: 0; }
+  .w-chat { flex: 1 1 0; min-height: 120px; margin: 8px; box-shadow: 3px 3px 0 var(--ink); }
   .w-chat :deep(.bar) { display: none; }
   .log { padding: 12px 10px; gap: 12px; }
-  .composer { flex: none; gap: 8px; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); border: 0; border-top: 1px solid var(--line); box-shadow: 0 -3px 0 rgba(20,2,6,.08); z-index: 2; }
+  .bubble { font-size: 15px; padding: 10px 13px; }
+  .composer { gap: 8px; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); border: 0; border-top: 1px solid var(--line); box-shadow: 0 -3px 0 rgba(20,2,6,.08); }
   .chips { display: none; } .chips.open { display: flex; }
   .chips .px-chip { font-size: 13px; padding: 7px 10px; }
   .inrow { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; }
@@ -616,13 +618,14 @@ blockquote { margin: 8px 0; padding: 8px 12px; background: var(--butter); border
   .send { min-height: 44px; padding: 0 12px; }
   .send .arr { display: none; }
   .modes label { padding: 5px 9px; font-size: 12px; }
-  .p-fb :deep(.panelbody) { padding: 0 0 12px; }
   .fstrip { grid-template-columns: repeat(3, minmax(0, 1fr)); } .fstrip .fact:last-child { grid-column: span 2; }
   .fbgrid { padding: 10px 12px 0; } .fbbtns { padding: 12px 12px 0; }
+  /* 手机老师条里的控制按钮：2×2 */
+  .cb { height: 36px; font-size: 13px; gap: 5px; border-bottom: 1px solid var(--line); }
 }
-@media (min-width: 1100px) and (max-width: 1360px) { .main { grid-template-columns: minmax(0, 1fr) minmax(340px, 400px); } .fstrip { grid-template-columns: repeat(3, minmax(0, 1fr)); } .fstrip .fact:last-child { grid-column: span 2; } }
+@media (min-width: 1100px) and (max-width: 1360px) { .main { grid-template-columns: minmax(360px, 5fr) minmax(0, 7fr); } .fstrip { grid-template-columns: repeat(3, minmax(0, 1fr)); } .fstrip .fact:last-child { grid-column: span 2; } }
 @media (max-width: 600px) {
-  .cb { height: 38px; padding: 0 4px; gap: 4px; } .cb svg { width: 14px; height: 14px; }
+  .cb { padding: 0 4px; gap: 4px; } .cb svg { width: 14px; height: 14px; }
   .miss li { flex-direction: column; align-items: stretch; }
   .task h2 { font-size: 20px; }
   .facts3 .fact { padding: 8px; } .facts3 .fact b { font-size: 19px; }

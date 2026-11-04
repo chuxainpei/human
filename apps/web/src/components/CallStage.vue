@@ -139,15 +139,24 @@ const who = computed(() => (shown.value === 'buyer' ? 'Markus Weber' : '陈老�
 .lt.on { color: var(--ink); }
 .lt-idle.on i { background: #2b6cb0; } .lt-thinking.on i { background: var(--orange); animation: blinkSq .5s steps(1, end) infinite; } .lt-speaking.on i { background: var(--green); animation: blinkSq .35s steps(1, end) infinite; }
 @media (max-width: 1099px) {
-  .call { box-shadow: none; animation: none; }
-  .screen { flex: none; min-height: 0; height: clamp(180px, 31dvh, 300px); }
-  .bar { height: 26px; }
-  .cc { bottom: 10px; font-size: 14px; max-width: 92%; padding: 5px 10px; }
-  .name b { font-size: 14px; padding: 1px 8px; } .name span { display: none; }
-  .pip { width: 30%; min-width: 96px; right: 8px; bottom: 8px; box-shadow: 3px 3px 0 var(--ink); }
-  .pip__n { font-size: 11px; padding: 2px 6px; }
-  .lights { gap: 6px; padding: 0 8px; } .lt { font-size: 12px; gap: 4px; }
+  /* 手机：紧凑老师条 —— 左边画面（4:3，不压成横幅），右边标题 + 控制按钮 2×2 + 状态灯，把屏幕让给对话 */
+  .call { box-shadow: none; animation: none; display: grid; grid-template-columns: 50% minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .bar { grid-column: 2; grid-row: 1; height: 26px; gap: 6px; padding: 0 6px; border-left: 1px solid var(--line); }
+  .bar .tag { display: none; }
+  .live { padding: 0 6px; font-size: 11px; }
+  .screen { grid-column: 1; grid-row: 1 / 3; flex: none; min-height: 0; height: auto; aspect-ratio: 4 / 3; }
+  .ctrl { grid-column: 2; grid-row: 2; flex-direction: column; border-top: 0; border-left: 1px solid var(--line); }
+  .btns { display: grid; grid-template-columns: 1fr 1fr; flex: 1; }
+  .btns :slotted(.cb) { height: auto; min-height: 34px; }
+  .lights { border-left: 0; border-top: 1px solid var(--line); justify-content: center; padding: 5px 6px; }
+  .cc { display: none; }
+  .name b { font-size: 13px; padding: 0 7px; } .name span { display: none; }
+  .pip { width: 34%; min-width: 0; right: 6px; bottom: 6px; box-shadow: 2px 2px 0 var(--ink); }
+  .pip__n { display: none; }
+  .veil b { font-size: 16px; } .veil span { font-size: 12px; }
+  .think { right: 6px; top: 6px; padding: 4px 6px; }
+  .lights { gap: 6px; } .lt { font-size: 12px; gap: 4px; }
 }
-@media (max-width: 420px) { .lt:not(.on) { display: none; } }
+
 @media (prefers-reduced-motion: reduce) { .frame { transition: none; } }
 </style>
