@@ -43,11 +43,16 @@ onMounted(() => {
   const setNav = () => rootStyle.setProperty('--nav-h', `${nav?.offsetHeight ?? 0}px`)
   setNav(); if (nav) { navRo = new ResizeObserver(setNav); navRo.observe(nav) }
   onVV(); window.visualViewport?.addEventListener('resize', onVV); window.visualViewport?.addEventListener('scroll', onVV)
+  // 手机：面板浮在对话区上方（不改变对话区大小），顶部贴着工具按钮下沿
+  const tools = document.querySelector('.learn .tools') as HTMLElement | null
+  const setTop = () => { const m = tools?.offsetParent as HTMLElement | null; if (tools && m) rootStyle.setProperty('--ptop', `${tools.offsetTop + tools.offsetHeight + 8}px`) }
+  setTop(); if (tools) { toolsRo = new ResizeObserver(setTop); toolsRo.observe(tools) }
 })
+let toolsRo: ResizeObserver | null = null
 onBeforeUnmount(() => {
-  document.documentElement.classList.remove('in-learn'); navRo?.disconnect()
+  document.documentElement.classList.remove('in-learn'); navRo?.disconnect(); toolsRo?.disconnect()
   window.visualViewport?.removeEventListener('resize', onVV); window.visualViewport?.removeEventListener('scroll', onVV)
-  for (const k of ['--nav-h', '--vvh', '--vvt']) rootStyle.removeProperty(k)
+  for (const k of ['--nav-h', '--vvh', '--vvt', '--ptop']) rootStyle.removeProperty(k)
 })
 
 onMounted(async () => {
@@ -83,6 +88,8 @@ const panel = ref<PanelId | null>('task')
 const taskSeen = ref(true)
 watch(panel, (p) => { if (p === 'task') taskSeen.value = true })
 function toggle(p: PanelId) { panel.value = panel.value === p ? null : p }
+// 手机：任务面板里的“下一步”按钮点完就收起面板，把对话区还给学生
+function stepAction(a: string) { if (isMobile()) panel.value = null; void doAction(a) }
 const PANEL_META = computed(() => ({
   task: { label: `任务 · ${STAGES[stageIdx.value].t}`, tone: 'orange' as const },
   src: { label: '出处', tone: 'green' as const },
@@ -99,7 +106,7 @@ watch(stage, (s, old) => {
   clearTimeout(swapTimer)
   if (s === 'practice') { activeRole.value = 'teacher'; swapTimer = setTimeout(() => { activeRole.value = lastSpeaker() }, reduced ? 0 : 1300) }
   else activeRole.value = 'teacher'
-  if (old && s !== old) { if (s === 'feedback') taskSeen.value = false; else { panel.value = 'task'; taskSeen.value = true } void nextTick(() => { document.querySelector('.panelbody')?.scrollTo({ top: 0 }) }) }
+  if (old && s !== old) { if (s === 'feedback' || isMobile()) taskSeen.value = false; else { panel.value = 'task'; taskSeen.value = true } void nextTick(() => { document.querySelector('.panelbody')?.scrollTo({ top: 0 }) }) }
 }, { immediate: true })
 const mainRole = computed<AvatarId>(() => (stage.value === 'practice' ? activeRole.value : 'teacher'))
 const pipRole = computed<AvatarId | null>(() => (stage.value === 'practice' ? (mainRole.value === 'buyer' ? 'teacher' : 'buyer') : null))
@@ -264,7 +271,7 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
                 <p>海外买家要 500 件样品。先跟陈老师弄懂三个知识点，再和这位买家谈一轮，最后提交一份完整方案。</p>
                 <ul class="goals"><li v-for="g in state.course?.learningGoals ?? []" :key="g">{{ g }}</li></ul>
                 <p class="muted small">随时可以在下方输入框向陈老师提问；回答里的 [1] [2] 点开就是原文。</p>
-                <button class="px-btn is-pink" @click="doAction('next')" :disabled="paused || !state.session">开始讲解</button>
+                <button class="px-btn is-pink" @click="stepAction('next')" :disabled="paused || !state.session">开始讲解</button>
               </template>
 
               <template v-if="stage === 'explain'">
@@ -285,7 +292,7 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
                 </template>
                 <hr />
                 <p class="small">准备好了，就和海外买家 Markus Weber 磋商。他只关心自己的条件，不会替你写方案。</p>
-                <button class="px-btn is-pink" :disabled="busy || paused" @click="doAction('startPractice')">开始买方谈判</button>
+                <button class="px-btn is-pink" :disabled="busy || paused" @click="stepAction('startPractice')">开始买方谈判</button>
               </template>
 
               <template v-if="stage === 'practice'">
@@ -600,7 +607,9 @@ blockquote { margin: 8px 0; padding: 8px 12px; background: var(--butter); border
   .tool { height: 32px; padding: 0 10px; }
   .tool .cnt-l { display: none; }
   .tool.t-home { display: inline-flex; }
-  .panel { flex: none; max-height: 50dvh; margin: 8px 8px 0; box-shadow: 3px 3px 0 var(--ink); }
+  .main { position: relative; }
+  /* 面板浮层：盖在对话区上面，对话区大小永远不变；老师条和工具按钮不被盖住，底部留出输入栏 */
+  .panel { position: absolute; z-index: 30 !important; left: 8px; right: 8px; top: var(--ptop, 196px); max-height: calc(100% - var(--ptop, 196px) - 84px); margin: 0; box-shadow: 4px 4px 0 var(--ink), 0 12px 32px rgba(20, 2, 6, .28); }
   .panel :deep(.panelbody) { padding: 12px; }
   .p-fb :deep(.panelbody) { padding: 0 0 12px; }
   .side { flex: 1 1 0; min-height: 0; gap: 0; }

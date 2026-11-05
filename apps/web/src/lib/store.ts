@@ -1,5 +1,5 @@
 import { reactive, ref } from 'vue'
-import { api, ApiError, newRequestId, sse, type Citation, type SessionView, type Turn } from './api'
+import { api, ApiError, newRequestId, setSessionKey, sse, type Citation, type SessionView, type Turn } from './api'
 import { Speaker, type SpeechEvent } from './speech'
 
 export const COURSE_ID = 'trade-quote-unit-v1'
@@ -65,6 +65,7 @@ export async function startSession() {
   speaker.unlock() // 用户点击“开始学习”时才解锁声音
   clearError()
   const s = await api.createSession()
+  setSessionKey(s.key ?? null); delete s.key
   state.session = s; state.turns = [...s.turns]; state.check = null; state.retryQuestion = null; state.retryResult = null
   sessionStorage.setItem('tam_session', s.id)
   return s
@@ -72,7 +73,7 @@ export async function startSession() {
 export async function resumeSession() {
   const id = sessionStorage.getItem('tam_session')
   if (!id) return null
-  try { const s = await api.session(id); state.session = s; state.turns = [...s.turns]; return s } catch { sessionStorage.removeItem('tam_session'); return null }
+  try { const s = await api.session(id); state.session = s; state.turns = [...s.turns]; return s } catch { sessionStorage.removeItem('tam_session'); setSessionKey(null); return null }
 }
 
 /** 停止讲话：只停声音，保留文字与阶段。 */
@@ -90,7 +91,7 @@ export async function stopGenerating() {
   await api.cancel(state.session.id, c.requestId).catch(() => {})
 }
 
-export async function doAction(action: string) {
+export async function doAction(action: string, recovered = false) {
   if (!state.session) return
   if (action !== 'pause' && action !== 'resume') await stopGenerating()
   if (action === 'pause') { await stopGenerating() }
@@ -99,10 +100,14 @@ export async function doAction(action: string) {
     state.session = s; state.turns = [...s.turns]
     if (action === 'startPractice' || action === 'restartPractice') { state.check = null; state.retryQuestion = null; state.retryResult = null; const open = s.turns.at(-1); if (open?.role === 'buyer') speaker.enqueue(open.text, 'buyer') }
     clearError()
-  } catch (e) { setError((e as ApiError).message) }
+  } catch (e) {
+    // 会话已失效：开课类操作自动换一节新课再做一次
+    if ((e as ApiError).code === 'NOT_FOUND' && !recovered && (action === 'next' || action === 'startPractice')) { try { await startSession(); return await doAction(action, true) } catch { /* fallthrough */ } }
+    setError((e as ApiError).message)
+  }
 }
 
-interface RunOpts { path: string; body: Record<string, unknown>; kind: string; studentText?: string; role: 'teacher' | 'buyer'; streamText: boolean; onDone?: (d: any) => void }
+interface RunOpts { path: string; body: Record<string, unknown>; kind: string; studentText?: string; role: 'teacher' | 'buyer'; streamText: boolean; onDone?: (d: any) => void; recovered?: boolean }
 /** 发起一次生成：旧请求一律作废；旧回调因 requestId 不同被忽略。 */
 async function run(o: RunOpts) {
   if (!state.session) return
@@ -143,6 +148,12 @@ async function run(o: RunOpts) {
     },
     onError: (code, msg) => {
       if (current?.requestId !== requestId) return
+      // 会话在服务端已不存在（服务重启、超时、钥匙丢失）：不打扰学生，自动重新开一节课并把这句话重发一次
+      if (code === 'NOT_FOUND' && !o.recovered && o.kind === 'ask') {
+        recoverAfter = { o, oldId: state.session!.id }
+        state.turns = state.turns.filter((t) => t !== bubble && t.turnId !== 'pending-s-' + requestId)
+        return
+      }
       bubble.streaming = false
       if (code === 'CANCELLED') { bubble.failed = bubble.text ? '已停止生成（以上为部分内容，未保存）' : '已停止生成'; }
       else { bubble.failed = msg; setError(msg) }
@@ -150,7 +161,15 @@ async function run(o: RunOpts) {
     },
   })
   if (current?.requestId === requestId) { current = null; state.generating = false; syncPhase() }
+  if (recoverAfter && recoverAfter.o === o) {
+    const { oldId } = recoverAfter; recoverAfter = null
+    const keep = state.turns.slice()
+    try { await startSession() } catch { setError('课堂连接断开了，请刷新页面重新开始'); return }
+    state.turns = [...keep, ...state.turns]
+    await run({ ...o, path: o.path.replace(oldId, state.session!.id), recovered: true })
+  }
 }
+let recoverAfter: { o: RunOpts; oldId: string } | null = null
 
 export const ask = (text: string) => run({ path: `/sessions/${state.session!.id}/turns`, body: { intent: 'ask', text }, kind: 'ask', studentText: text, role: 'teacher', streamText: true })
 export const explain = (cardId: string, again = false) => run({ path: `/sessions/${state.session!.id}/turns`, body: { intent: 'explain', cardId, again }, kind: again ? 'example' : 'explain', role: 'teacher', streamText: true, onDone: (d) => { state.lastExample = d.example ?? null; refresh() } })

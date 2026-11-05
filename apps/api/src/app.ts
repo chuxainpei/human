@@ -44,7 +44,11 @@ export function buildApp(cfg: Config, deps: Deps = {}) {
     })
   }
 
-  function sess(req: FastifyRequest<{ Params: { id: string } }>): Session | null { return store.get(req.params.id, req.cookies[COOKIE]) }
+  // 会话归属：优先认请求头 x-session-key（每个标签页各自保存，企业微信等内置浏览器丢 cookie、或多开标签页互相覆盖 cookie 时也能用），其次认 cookie。
+  function sess(req: FastifyRequest<{ Params: { id: string } }>): Session | null {
+    const h = req.headers['x-session-key']; const key = typeof h === 'string' && h ? h : undefined
+    return (key && store.get(req.params.id, key)) || store.get(req.params.id, req.cookies[COOKIE])
+  }
 
   // ---------- 能力：真实探测，不以环境变量存在判在线 ----------
   app.get(`${P}/capabilities`, async (req) => {
@@ -71,7 +75,7 @@ export function buildApp(cfg: Config, deps: Deps = {}) {
   app.post(`${P}/sessions`, async (_req, reply) => {
     const s = store.create()
     reply.setCookie(COOKIE, s.owner, { httpOnly: true, sameSite: 'lax', path: cfg.basePath || '/', secure: cfg.cookieSecure, maxAge: cfg.limits.sessionTtlMs / 1000 })
-    return publicSession(s)
+    return { ...publicSession(s), key: s.owner }
   })
   app.get<{ Params: { id: string } }>(`${P}/sessions/:id`, async (req, reply) => { const s = sess(req); return s ? publicSession(s) : send(reply, 404, 'NOT_FOUND') })
   app.delete<{ Params: { id: string } }>(`${P}/sessions/:id`, async (req, reply) => { const s = sess(req); if (!s) return send(reply, 404, 'NOT_FOUND'); store.delete(s.id); reply.clearCookie(COOKIE, { path: cfg.basePath || '/' }); return { deleted: true } })

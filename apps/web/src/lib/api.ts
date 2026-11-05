@@ -9,12 +9,16 @@ export interface SessionView {
   retry: { type: string; reason: string; question: string; submitted: boolean; result: null | { correct: boolean; details: string[]; feedback: string } } | null
 }
 export type Stage = 'intro' | 'explain' | 'practice' | 'feedback' | 'retry' | 'done'
+/** 本标签页的会话钥匙（服务端创建会话时返回）；随每个请求放在 x-session-key 头里。 */
+let sessionKey: string | null = sessionStorage.getItem('tam_key')
+export function setSessionKey(k: string | null) { sessionKey = k; if (k) sessionStorage.setItem('tam_key', k); else sessionStorage.removeItem('tam_key') }
+const hdr = (json: boolean): Record<string, string> => ({ ...(json ? { 'content-type': 'application/json' } : {}), ...(sessionKey ? { 'x-session-key': sessionKey } : {}) })
 export class ApiError extends Error { constructor(public status: number, public code: string, msg: string) { super(msg) } }
 
 async function j<T>(method: string, path: string, body?: unknown): Promise<T> {
   let r: Response
   try {
-    r = await fetch(API + path, { method, credentials: 'same-origin', headers: body !== undefined ? { 'content-type': 'application/json' } : undefined, body: body !== undefined ? JSON.stringify(body) : undefined })
+    r = await fetch(API + path, { method, credentials: 'same-origin', headers: hdr(body !== undefined), body: body !== undefined ? JSON.stringify(body) : undefined })
   } catch { throw new ApiError(0, 'NETWORK', '网络连接失败，请检查网络后重试') }
   const data = await r.json().catch(() => ({}))
   if (!r.ok) throw new ApiError(r.status, data.code ?? 'ERROR', data.message ?? `请求失败（${r.status}）`)
@@ -23,7 +27,7 @@ async function j<T>(method: string, path: string, body?: unknown): Promise<T> {
 export const api = {
   capabilities: (refresh = false) => j<Record<string, any>>('GET', `/capabilities${refresh ? '?refresh=1' : ''}`),
   course: (id: string) => j<Record<string, any>>('GET', `/courses/${id}`),
-  createSession: () => j<SessionView>('POST', '/sessions', {}),
+  createSession: () => j<SessionView & { key?: string }>('POST', '/sessions', {}),
   session: (id: string) => j<SessionView>('GET', `/sessions/${id}`),
   action: (id: string, action: string) => j<SessionView>('POST', `/sessions/${id}/actions`, { action }),
   cancel: (id: string, requestId?: string) => j<{ cancelled: boolean }>('POST', `/sessions/${id}/cancel`, { requestId }),
@@ -42,7 +46,7 @@ export async function sse(path: string, body: Record<string, unknown>, signal: A
   const finish = (fn: () => void) => { if (finished) return; finished = true; try { fn() } catch (e) { console.error('[sse handler]', e) } }
   let r: Response
   try {
-    r = await fetch(API + path, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal })
+    r = await fetch(API + path, { method: 'POST', credentials: 'same-origin', headers: hdr(true), body: JSON.stringify(body), signal })
   } catch (e) {
     return finish(() => h.onError(signal.aborted ? 'CANCELLED' : 'NETWORK', signal.aborted ? '已停止' : '网络连接失败'))
   }
