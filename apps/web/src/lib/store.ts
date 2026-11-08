@@ -7,8 +7,9 @@ export type Phase = 'idle' | 'thinking' | 'speaking' | 'error'
 
 export const speaker = new Speaker()
 ;(window as unknown as { __speakerActive: () => boolean }).__speakerActive = () => speaker.active()
+;(window as unknown as { __voiceDiag: () => unknown }).__voiceDiag = () => speaker.diag()
 // 建课可能不在用户手势里（首页 ?start=1 在 onMounted 中建课），此时 AudioContext 建出来就是 suspended。
-// 挂一个全局手势兜底：用户第一次点/按任意元素时把声音唤醒。
+// 挂一个全局手势兜底：用户第一次点/按任意元素时把整条声音链路建起来。
 speaker.installGestureUnlock()
 export const state = reactive({
   course: null as null | Record<string, any>,
@@ -65,7 +66,9 @@ export async function loadEntry() {
 }
 
 export async function startSession(stage?: string) {
-  speaker.unlock() // 用户点击“开始学习”时才解锁声音
+  // 不在这里解锁声音：建课可能发生在非用户手势里（首页 ?start=1 在 onMounted 中建课），
+  // 那时建出来的 AudioContext 是 suspended，iOS 上音频链路会废掉。
+  // 声音由第一次真实手势唤醒（见 speaker.installGestureUnlock）。
   clearError()
   const s = await api.createSession(stage)
   setSessionKey(s.key ?? null); delete s.key

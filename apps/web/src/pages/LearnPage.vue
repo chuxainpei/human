@@ -26,6 +26,18 @@ const mode = ref<'ask' | 'negotiate'>('ask')
 const activeCard = ref('K1')
 const logEl = ref<HTMLElement | null>(null)
 const voiceOn = ref(true)
+// 语音诊断：?voice=1 时显示。用于定位「老师不出声 / 嘴不动」这类问题。
+const showVoiceDiag = ref(route.query.voice === '1')
+const voiceDiag = ref({ mode: 'server', ctxState: 'none', hasGraph: false, speaking: false, level: -1, pending: 0, lastError: '', zhVoices: 0, hasSpeechSynthesis: true })
+let voiceDiagTimer: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  if (!showVoiceDiag.value) return
+  voiceDiagTimer = setInterval(() => {
+    const d = (window as unknown as { __voiceDiag?: () => unknown }).__voiceDiag?.()
+    if (d) voiceDiag.value = d as typeof voiceDiag.value
+  }, 300)
+})
+onBeforeUnmount(() => { if (voiceDiagTimer) clearInterval(voiceDiagTimer) })
 const offer = reactive({ price: '', deposit: '', days: '', margin: '' })
 const retryForm = reactive({ grossProfit: '', grossMarginPercent: '', failing: [] as string[], explanation: '' })
 const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
@@ -251,6 +263,15 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
           <button class="cb end" :disabled="ended" title="结束本节课" @click="endLearning"><svg viewBox="0 0 24 24"><path d="M3 14c5-5 13-5 18 0l-2.5 2.5-3-2v-2.5c-2.3-.7-4.7-.7-7 0V14.5l-3 2z" /></svg><span>结束</span></button>
         </CallStage>
         <p v-if="state.voiceNote" class="vnote small">声音：{{ state.voiceNote }}，字幕照常显示。</p>
+        <div v-if="showVoiceDiag" class="vdiag no-print" role="status" aria-live="polite">
+          <b>语音诊断</b>
+          <span>模式 {{ voiceDiag.mode }}</span>
+          <span>音频上下文 {{ voiceDiag.ctxState }}</span>
+          <span>分析链路 {{ voiceDiag.hasGraph ? '已接' : '未接' }}</span>
+          <span>音量 {{ voiceDiag.level >= 0 ? voiceDiag.level.toFixed(3) : '—' }}</span>
+          <span>中文语音 {{ voiceDiag.zhVoices }} 个</span>
+          <span v-if="voiceDiag.lastError" class="bad">{{ voiceDiag.lastError }}</span>
+        </div>
         <div class="tools no-print" role="toolbar" aria-label="课堂面板">
           <button type="button" class="tool t-orange" :class="{ on: panel === 'task' }" :aria-expanded="panel === 'task'" @click="toggle('task')">
             <i></i>任务<span class="cnt">{{ stageIdx + 1 }}/{{ STAGES.length }}<span class="cnt-l"> · {{ STAGES[stageIdx].t }}</span></span><b v-if="!taskSeen" class="dot" aria-label="有新任务"></b>
@@ -483,6 +504,11 @@ const fmtNum = (s?: string | number) => (s === undefined || s === null ? '—' :
 .side { grid-area: side; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
 .composer { flex: none; }
 .vnote { margin: 6px 2px 0; color: var(--muted); flex: none; }
+
+/* 语音诊断（?voice=1）：定位「老师不出声 / 嘴不动」 */
+.vdiag { margin: 6px 2px 0; padding: 6px 8px; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); border: 1px dashed var(--line); border-radius: 8px; flex: none; }
+.vdiag b { color: var(--ink); }
+.vdiag .bad { color: var(--pink); }
 
 /* 通话控制按钮 */
 .cb { flex: 1 1 0; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 46px; padding: 0 8px; border: 0; border-right: 1px solid var(--line); background: transparent; font-size: 14px; box-shadow: none; }

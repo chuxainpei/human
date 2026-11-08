@@ -28,22 +28,33 @@ export class Speaker {
   private emit(e: SpeechEvent) { for (const f of this.listeners) f(e) }
 
   /** 幂等解锁：可安全重复调用。
-   * 浏览器策略要求 AudioContext 在“用户手势”里创建或恢复，否则建出来就是 suspended、play() 被 NotAllowedError 拒。
-   * 但建课可能发生在非手势上下文（首页 ?start=1 在 onMounted 里建课），此时这里拿不到 running 的 ctx。
-   * 因此：这里建好 ctx 后标记为“待激活”，由任意一次真实手势（touchstart/pointerdown/click/keydown）补一次 resume()。
-   * 若上下文已存在但被挂起（切后台、系统策略），同样尝试恢复。 */
+   *  浏览器策略要求 AudioContext 在「用户手势」里创建或恢复，否则建出来就是 suspended。
+   *  而 iOS Safari / 企业微信 WebView 更严：在 suspended 状态下用 createMediaElementSource
+   *  接好的音频链路，后续即使 resume() 成功也可能永远不通向扬声器——表现是「老师在说话、嘴也不动，但听不到声」。
+   *  所以不要在非手势的地方建 ctx：真正创建推迟到第一次真实手势（installGestureUnlock 捕获），
+   *  那时 ctx 一诞生就是 running，链路是通的。 */
   unlock() {
     if (this.ctx) { void this.resumeCtx(); return }
+    this.buildAudioGraph()
+  }
+
+  /** 在用户手势的同步栈里真正建好音频链路。
+   *  ctx 与 analyser 必须在这里一次性建成：iOS 上事后 resume 救不回已断开的链路。 */
+  private buildAudioGraph() {
+    if (this.ctx) return
     try {
       this.audio = new Audio(); this.audio.preload = 'auto'
       const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-      this.ctx = new AC()
-      const src = this.ctx.createMediaElementSource(this.audio)
-      this.analyser = this.ctx.createAnalyser(); this.analyser.fftSize = 512
-      src.connect(this.analyser); this.analyser.connect(this.ctx.destination)
-      this.data = new Uint8Array(new ArrayBuffer(this.analyser.fftSize))
-      this.audio.play().catch(() => {}) // 空播放解锁（无手势时会被策略拒绝，无妨）
-      void this.resumeCtx()
+      const ctx = new AC()
+      this.ctx = ctx
+      const src = ctx.createMediaElementSource(this.audio)
+      const analyser = ctx.createAnalyser(); analyser.fftSize = 512
+      src.connect(analyser); analyser.connect(ctx.destination)
+      this.analyser = analyser
+      this.data = new Uint8Array(new ArrayBuffer(analyser.fftSize))
+      // 空播放：在手势内解锁媒体元素，后面播 MP3 才不会被拦
+      this.audio.play().catch(() => {})
+      void ctx.resume().catch(() => {})
     } catch { /* 无 WebAudio：仍可播放，但嘴型按节奏 */ }
   }
 
@@ -55,11 +66,12 @@ export class Speaker {
     try { await ctx.resume() } catch { /* 需要用户手势，等下一次交互 */ }
   }
 
-  /** 在页面级捕获任意一次真实用户手势，用来救活被策略挂起的 AudioContext。
-   *  只在第一次交互时挂载；一旦 ctx 已经 running 就自动卸载。 */
+  /** 在页面级捕获任意一次真实用户手势，用来把声音真正唤醒。
+   *  这里不只是 resume，还要在手势栈内把整条音频链路建起来——iOS 上这是能否出声的关键。 */
   installGestureUnlock() {
     if (typeof document === 'undefined') return
     const handler = () => {
+      this.buildAudioGraph()
       void this.resumeCtx()
       if (this.ctx?.state === 'running') this.removeGestureUnlock()
     }
@@ -88,6 +100,27 @@ export class Speaker {
     let sum = 0
     for (let i = 0; i < this.data.length; i++) { const v = (this.data[i] - 128) / 128; sum += v * v }
     return Math.sqrt(sum / this.data.length)
+  }
+
+  /** 语音链路诊断：给 ?voice=1 的调试面板用。定位「无声 / 嘴不动」时看这里最快。 */
+  diag() {
+    const ctx = this.ctx
+    let zhVoices = 0
+    try {
+      const vs = window.speechSynthesis?.getVoices?.() ?? []
+      zhVoices = vs.filter((v) => /^zh/i.test(v.lang)).length
+    } catch { /* 无 speechSynthesis */ }
+    return {
+      mode: this.mode,
+      ctxState: ctx ? ctx.state : 'none',
+      hasGraph: !!this.analyser,
+      speaking: this.speaking,
+      level: this.level(),
+      pending: this.queue.length,
+      lastError: this.lastError,
+      zhVoices,
+      hasSpeechSynthesis: typeof window.speechSynthesis !== 'undefined',
+    }
   }
 
   /** 加入一段文字（流式时可多次调用），按句切分后排队。 */
@@ -131,7 +164,11 @@ export class Speaker {
           if (!played && g === this.gen) { this.mode = 'browser'; this.queue.unshift(item); continue }
         } else if (this.mode === 'browser') {
           const ok = await this.speakBrowser(text, g, item.r)
-          if (!ok && g === this.gen) { this.emit({ type: 'error', at: performance.now(), detail: '浏览器没有可用的中文语音，已改为仅文字' }); this.mode = 'off'; this.queue = []; break }
+          if (!ok && g === this.gen) {
+            // 浏览器没有中文语音（iOS 企业微信常见）：不能悄悄静音，要说清楚。
+            this.emit({ type: 'error', at: performance.now(), detail: '这台设备没有可用的中文语音，且服务器朗读被浏览器拦截了；请换一个浏览器打开，或检查手机静音开关' })
+            this.mode = 'off'; this.queue = []; break
+          }
         }
       }
     } finally {
