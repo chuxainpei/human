@@ -4,6 +4,8 @@
 set -euo pipefail
 : "${RELEASE_TARBALL:?}"; : "${RELEASE_SHA:?}"
 NGINX_SITE="${NGINX_SITE:-/etc/nginx/sites-available/pkusi}"; R=/var/www/human; TS=$(date +%Y%m%d%H%M%S)
+# 配置文件不在本脚本目录旁边：systemd unit 在 deploy/systemd/，nginx 片段在 deploy/nginx/
+DEPLOY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 id human >/dev/null 2>&1 || useradd --system --home /var/www/human --shell /usr/sbin/nologin human
 mkdir -p $R/releases $R/backup /etc/human
 # Python edge-tts in its own venv
@@ -13,9 +15,9 @@ tar -C $R/releases -xzf "$RELEASE_TARBALL"; mv -T $R/releases/human-$RELEASE_SHA
 chown -R root:root $R/releases/$RELEASE_SHA; chmod -R a+rX $R/releases/$RELEASE_SHA
 PREV=$(readlink $R/current || echo none)
 ln -sfn $R/releases/$RELEASE_SHA $R/current
-cp "$(dirname "$0")/human-api.service" /etc/systemd/system/human-api.service
+cp "$DEPLOY_DIR/systemd/human-api.service" /etc/systemd/system/human-api.service
 cp "$NGINX_SITE" $R/backup/pkusi.$TS
-cp "$(dirname "$0")/human.conf" /etc/nginx/snippets/human.conf
+cp "$DEPLOY_DIR/nginx/human.conf" /etc/nginx/snippets/human.conf
 grep -q 'include /etc/nginx/snippets/human.conf;' "$NGINX_SITE" || sed -i '0,/location \/ {/s//include \/etc\/nginx\/snippets\/human.conf;\n    location \/ {/' "$NGINX_SITE"
 if ! nginx -t; then cp $R/backup/pkusi.$TS "$NGINX_SITE"; rm -f /etc/nginx/snippets/human.conf; [ "$PREV" != none ] && ln -sfn "$PREV" $R/current; echo "NGINX TEST FAILED, restored"; exit 1; fi
 systemctl daemon-reload; systemctl enable human-api >/dev/null 2>&1; systemctl restart human-api
