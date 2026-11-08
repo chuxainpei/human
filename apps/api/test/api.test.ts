@@ -91,3 +91,24 @@ test('course API exposes no hidden constraints', async () => {
   const body = (await app.inject({ method: 'GET', url: '/human/api/courses/trade-quote-unit-v1' })).body
   assert.ok(!body.includes('serverOnly') && !body.includes('buyerMaximum') && !body.includes('1280'))
 })
+
+test('a session can be reopened at a given stage, so a lost session does not restart the course', async () => {
+  const { app } = await setup(fakeLlm())
+  const r = await app.inject({ method: 'POST', url: '/human/api/sessions', payload: { stage: 'practice' } })
+  assert.equal(r.json().stage, 'practice')
+  assert.equal(r.json().role, 'buyer')
+})
+
+test('reopening at a stage ignores a stage that is not reachable from the intro', async () => {
+  const { app } = await setup(fakeLlm())
+  const r = await app.inject({ method: 'POST', url: '/human/api/sessions', payload: { stage: 'feedback' } })
+  assert.equal(r.json().stage, 'intro')
+})
+
+test('a session that vanished from the server is reported as NOT_FOUND', async () => {
+  const { app, sid, cookie } = await setup(fakeLlm())
+  await app.inject({ method: 'DELETE', url: `/human/api/sessions/${sid}`, headers: { cookie } })
+  const r = await app.inject({ method: 'POST', url: `/human/api/sessions/${sid}/turns`, headers: { cookie }, payload: { requestId: 'x1', intent: 'negotiate', text: '每件 13.5 美元' } })
+  assert.equal(r.statusCode, 404)
+  assert.equal(r.json().code, 'NOT_FOUND')
+})

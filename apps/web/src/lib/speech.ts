@@ -27,9 +27,13 @@ export class Speaker {
   on(fn: (e: SpeechEvent) => void) { this.listeners.push(fn); return () => { this.listeners = this.listeners.filter((x) => x !== fn) } }
   private emit(e: SpeechEvent) { for (const f of this.listeners) f(e) }
 
-  /** 必须在用户手势中调用一次：创建 AudioContext 与可复用的 audio 元素（解锁自动播放）。 */
+  /** 幂等解锁：可安全重复调用。
+   * 浏览器策略要求 AudioContext 在“用户手势”里创建或恢复，否则建出来就是 suspended、play() 被 NotAllowedError 拒。
+   * 但建课可能发生在非手势上下文（首页 ?start=1 在 onMounted 里建课），此时这里拿不到 running 的 ctx。
+   * 因此：这里建好 ctx 后标记为“待激活”，由任意一次真实手势（touchstart/pointerdown/click/keydown）补一次 resume()。
+   * 若上下文已存在但被挂起（切后台、系统策略），同样尝试恢复。 */
   unlock() {
-    if (this.ctx) { void this.ctx.resume(); return }
+    if (this.ctx) { void this.resumeCtx(); return }
     try {
       this.audio = new Audio(); this.audio.preload = 'auto'
       const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
@@ -38,8 +42,43 @@ export class Speaker {
       this.analyser = this.ctx.createAnalyser(); this.analyser.fftSize = 512
       src.connect(this.analyser); this.analyser.connect(this.ctx.destination)
       this.data = new Uint8Array(new ArrayBuffer(this.analyser.fftSize))
-      this.audio.play().catch(() => {}) // 空播放解锁
+      this.audio.play().catch(() => {}) // 空播放解锁（无手势时会被策略拒绝，无妨）
+      void this.resumeCtx()
     } catch { /* 无 WebAudio：仍可播放，但嘴型按节奏 */ }
+  }
+
+  /** 恢复被浏览器挂起的 AudioContext。成功与否都无所谓：失败时下一个手势还会再试。 */
+  private async resumeCtx() {
+    const ctx = this.ctx
+    if (!ctx) return
+    if (ctx.state === 'running') return
+    try { await ctx.resume() } catch { /* 需要用户手势，等下一次交互 */ }
+  }
+
+  /** 在页面级捕获任意一次真实用户手势，用来救活被策略挂起的 AudioContext。
+   *  只在第一次交互时挂载；一旦 ctx 已经 running 就自动卸载。 */
+  installGestureUnlock() {
+    if (typeof document === 'undefined') return
+    const handler = () => {
+      void this.resumeCtx()
+      if (this.ctx?.state === 'running') this.removeGestureUnlock()
+    }
+    this.gestureHandler = handler
+    const opts = { capture: true, passive: true } as AddEventListenerOptions
+    document.addEventListener('pointerdown', handler, opts)
+    document.addEventListener('touchstart', handler, opts)
+    document.addEventListener('keydown', handler, opts)
+    document.addEventListener('click', handler, opts)
+  }
+  private gestureHandler: ((e: Event) => void) | null = null
+  private removeGestureUnlock() {
+    if (!this.gestureHandler) return
+    const opts = { capture: true } as AddEventListenerOptions
+    document.removeEventListener('pointerdown', this.gestureHandler, opts)
+    document.removeEventListener('touchstart', this.gestureHandler, opts)
+    document.removeEventListener('keydown', this.gestureHandler, opts)
+    document.removeEventListener('click', this.gestureHandler, opts)
+    this.gestureHandler = null
   }
 
   /** 0..1 的实时音量；没有分析器时返回 -1（角色改用节奏动画，但仍只在播放中说话）。 */
@@ -86,8 +125,10 @@ export class Speaker {
           this.pending.delete(item.r + '|' + text)
           if (g !== this.gen) { if (url) URL.revokeObjectURL(url); break }
           if (!url) { this.emit({ type: 'error', at: performance.now(), detail: '服务器朗读失败，已切换为浏览器语音' }); this.mode = 'browser'; this.queue.unshift(item); continue }
-          await this.playUrl(url, g, text)
+          const played = await this.playUrl(url, g, text)
           URL.revokeObjectURL(url)
+          // 播放被浏览器策略拦下：退回浏览器语音，并把这一句放回队列（保留角色）
+          if (!played && g === this.gen) { this.mode = 'browser'; this.queue.unshift(item); continue }
         } else if (this.mode === 'browser') {
           const ok = await this.speakBrowser(text, g, item.r)
           if (!ok && g === this.gen) { this.emit({ type: 'error', at: performance.now(), detail: '浏览器没有可用的中文语音，已改为仅文字' }); this.mode = 'off'; this.queue = []; break }
@@ -100,16 +141,33 @@ export class Speaker {
 
   private setSpeaking(v: boolean) { this.speaking = v }
 
+  /** 播放一段音频。返回 false 表示被浏览器策略拦下、未能真正播出（调用方负责降级）。 */
   private playUrl(url: string, g: number, text = '') {
-    return new Promise<void>((resolve) => {
+    return new Promise<boolean>((resolve) => {
       const a = this.audio ?? (this.audio = new Audio())
-      const cleanup = () => { a.onplaying = a.onended = a.onerror = a.onpause = null; resolve() }
+      let settled = false
+      const cleanup = () => { a.onplaying = a.onended = a.onerror = a.onpause = null }
+      const done = (ok: boolean) => { if (settled) return; settled = true; cleanup(); resolve(ok) }
       a.onplaying = () => { if (g !== this.gen) return; this.setSpeaking(true); this.emit({ type: 'start', at: performance.now(), detail: text }) }
-      a.onended = () => { this.setSpeaking(false); this.emit({ type: 'end', at: performance.now() }); cleanup() }
-      a.onpause = () => { if (!a.ended) { this.setSpeaking(false); const at = performance.now(); this.emit({ type: 'cancel', at, latencyMs: this.stopClickedAt ? Math.round(at - this.stopClickedAt) : undefined }); cleanup() } }
-      a.onerror = () => { this.setSpeaking(false); this.emit({ type: 'error', at: performance.now(), detail: '音频播放失败' }); cleanup() }
+      a.onended = () => { this.setSpeaking(false); this.emit({ type: 'end', at: performance.now() }); done(true) }
+      a.onpause = () => { if (!a.ended) { this.setSpeaking(false); const at = performance.now(); this.emit({ type: 'cancel', at, latencyMs: this.stopClickedAt ? Math.round(at - this.stopClickedAt) : undefined }); done(true) } }
+      a.onerror = () => { this.setSpeaking(false); this.emit({ type: 'error', at: performance.now(), detail: '音频播放失败' }); done(false) }
       a.src = url
-      a.play().catch((e) => { this.setSpeaking(false); this.emit({ type: 'error', at: performance.now(), detail: '浏览器阻止了播放：' + (e?.name ?? '') }); cleanup() })
+      // 播放前先把被策略挂起的 AudioContext 拉回来；否则 analyser 拿不到音量，嘴型不动
+      void this.resumeCtx()
+      a.play().catch((e) => {
+        const name = (e as { name?: string } | undefined)?.name ?? ''
+        // NotAllowedError = 浏览器自动播放策略拦截：唤醒 ctx 后重试一次
+        if (name === 'NotAllowedError' && g === this.gen) {
+          void this.resumeCtx().then(() => {
+            a.play()
+              .then(() => { /* 播出去了，等 onplaying/onended 收尾 */ })
+              .catch(() => { this.setSpeaking(false); this.emit({ type: 'error', at: performance.now(), detail: '浏览器阻止了播放，已切换为浏览器语音' }); done(false) })
+          })
+          return
+        }
+        this.setSpeaking(false); this.emit({ type: 'error', at: performance.now(), detail: '浏览器阻止了播放：' + name }); done(false)
+      })
     })
   }
 

@@ -155,7 +155,8 @@ function suggest(q: string) {
 }
 function toggleVoice() {
   voiceOn.value = !voiceOn.value
-  if (!voiceOn.value) { stopSpeaking(); speaker.mode = 'off' } else speaker.mode = state.caps?.ttsMode === 'server-edge' ? 'server' : 'browser'
+  if (!voiceOn.value) { stopSpeaking(); speaker.mode = 'off' }
+  else { speaker.mode = state.caps?.ttsMode === 'server-edge' ? 'server' : 'browser'; speaker.unlock() }
 }
 async function interrupt() { await stopGenerating(); inputEl.value?.focus() }
 // 防重复发送：同一句话 4 秒内只发一次（连点芯片 / 回车 + 点击 都会造成同一个问题出现两遍）
@@ -171,7 +172,7 @@ async function send() {
   else await ask(t)
 }
 function onKey(e: KeyboardEvent) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (canSend.value) void send() } }
-function doExplain(id: string, again = false) { if (isMobile()) panel.value = null; void explain(id, again) }
+function doExplain(id: string, again = false) { if (isMobile()) panel.value = null; speaker.unlock(); void explain(id, again) }
 
 // ---------------------------------------------------------------- 方案、反馈、复练
 const toCents = (s: string) => Math.round(parseFloat(s) * 100)

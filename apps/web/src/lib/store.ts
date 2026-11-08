@@ -7,6 +7,9 @@ export type Phase = 'idle' | 'thinking' | 'speaking' | 'error'
 
 export const speaker = new Speaker()
 ;(window as unknown as { __speakerActive: () => boolean }).__speakerActive = () => speaker.active()
+// 建课可能不在用户手势里（首页 ?start=1 在 onMounted 中建课），此时 AudioContext 建出来就是 suspended。
+// 挂一个全局手势兜底：用户第一次点/按任意元素时把声音唤醒。
+speaker.installGestureUnlock()
 export const state = reactive({
   course: null as null | Record<string, any>,
   caps: null as null | Record<string, any>,
@@ -61,10 +64,10 @@ export async function loadEntry() {
   else setError('课程加载失败，请刷新重试')
 }
 
-export async function startSession() {
+export async function startSession(stage?: string) {
   speaker.unlock() // 用户点击“开始学习”时才解锁声音
   clearError()
-  const s = await api.createSession()
+  const s = await api.createSession(stage)
   setSessionKey(s.key ?? null); delete s.key
   state.session = s; state.turns = [...s.turns]; state.check = null; state.retryQuestion = null; state.retryResult = null
   sessionStorage.setItem('tam_session', s.id)
@@ -73,7 +76,13 @@ export async function startSession() {
 export async function resumeSession() {
   const id = sessionStorage.getItem('tam_session')
   if (!id) return null
-  try { const s = await api.session(id); state.session = s; state.turns = [...s.turns]; return s } catch { sessionStorage.removeItem('tam_session'); setSessionKey(null); return null }
+  try { const s = await api.session(id); state.session = s; state.turns = [...s.turns]; return s }
+  catch {
+    // 服务端已经没有这节课了（重启/超时/钥匙失效）。清掉本地痕迹，让上层重新开一节，
+    // 但不要把学生直接踢回首页——那会让他以为自己点的按钮没反应。
+    sessionStorage.removeItem('tam_session'); setSessionKey(null); state.session = null
+    return null
+  }
 }
 
 /** 停止讲话：只停声音，保留文字与阶段。 */
@@ -92,7 +101,11 @@ export async function stopGenerating() {
 }
 
 export async function doAction(action: string, recovered = false) {
-  if (!state.session) return
+  if (!state.session) {
+    // 没有会话就静默返回，学生点了「开始讲解」却毫无反应。宁可重开一节新课继续。
+    if (!recovered) { try { await startSession(); await doAction(action, true) } catch { /* 下面统一提示 */ } }
+    return
+  }
   if (action !== 'pause' && action !== 'resume') await stopGenerating()
   if (action === 'pause') { await stopGenerating() }
   try {
@@ -101,8 +114,11 @@ export async function doAction(action: string, recovered = false) {
     if (action === 'startPractice' || action === 'restartPractice') { state.check = null; state.retryQuestion = null; state.retryResult = null; const open = s.turns.at(-1); if (open?.role === 'buyer') speaker.enqueue(open.text, 'buyer') }
     clearError()
   } catch (e) {
-    // 会话已失效：开课类操作自动换一节新课再做一次
-    if ((e as ApiError).code === 'NOT_FOUND' && !recovered && (action === 'next' || action === 'startPractice')) { try { await startSession(); return await doAction(action, true) } catch { /* fallthrough */ } }
+    // 会话已失效：任何阶段动作都自动换一节新课再做一次，别把「会话过期」甩给学生。
+    if ((e as ApiError).code === 'NOT_FOUND' && !recovered) {
+      const stage = state.session?.stage
+      try { await startSession(stage); return await doAction(action, true) } catch { /* fallthrough */ }
+    }
     setError((e as ApiError).message)
   }
 }
@@ -148,9 +164,11 @@ async function run(o: RunOpts) {
     },
     onError: (code, msg) => {
       if (current?.requestId !== requestId) return
-      // 会话在服务端已不存在（服务重启、超时、钥匙丢失）：不打扰学生，自动重新开一节课并把这句话重发一次
-      if (code === 'NOT_FOUND' && !o.recovered && o.kind === 'ask') {
-        recoverAfter = { o, oldId: state.session!.id }
+      // 会话在服务端已不存在（服务重启、超时、钥匙丢失）：不打扰学生，自动重新开一节课并把这句话重发一次。
+      // 以前只对 ask 生效，谈判（negotiate）、讲解（explain）、复练（retry）一旦遇到会话失效就直报
+      // 「会话不存在或已过期」，老师在企业微信里彻底失联——这正是线上「没办法说话沟通」的主症状。
+      if (code === 'NOT_FOUND' && !o.recovered) {
+        recoverAfter = { o, oldId: state.session!.id, stage: state.session?.stage }
         state.turns = state.turns.filter((t) => t !== bubble && t.turnId !== 'pending-s-' + requestId)
         return
       }
@@ -162,14 +180,15 @@ async function run(o: RunOpts) {
   })
   if (current?.requestId === requestId) { current = null; state.generating = false; syncPhase() }
   if (recoverAfter && recoverAfter.o === o) {
-    const { oldId } = recoverAfter; recoverAfter = null
+    const { oldId, stage } = recoverAfter; recoverAfter = null
     const keep = state.turns.slice()
-    try { await startSession() } catch { setError('课堂连接断开了，请刷新页面重新开始'); return }
+    // 重开时把阶段带回去，学生不用从第一关重来
+    try { await startSession(stage) } catch { setError('课堂连接断开了，请刷新页面重新开始'); return }
     state.turns = [...keep, ...state.turns]
     await run({ ...o, path: o.path.replace(oldId, state.session!.id), recovered: true })
   }
 }
-let recoverAfter: { o: RunOpts; oldId: string } | null = null
+let recoverAfter: { o: RunOpts; oldId: string; stage?: string } | null = null
 
 export const ask = (text: string) => run({ path: `/sessions/${state.session!.id}/turns`, body: { intent: 'ask', text }, kind: 'ask', studentText: text, role: 'teacher', streamText: true })
 export const explain = (cardId: string, again = false) => run({ path: `/sessions/${state.session!.id}/turns`, body: { intent: 'explain', cardId, again }, kind: again ? 'example' : 'explain', role: 'teacher', streamText: true, onDone: (d) => { state.lastExample = d.example ?? null; refresh() } })

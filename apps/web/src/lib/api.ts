@@ -27,7 +27,7 @@ async function j<T>(method: string, path: string, body?: unknown): Promise<T> {
 export const api = {
   capabilities: (refresh = false) => j<Record<string, any>>('GET', `/capabilities${refresh ? '?refresh=1' : ''}`),
   course: (id: string) => j<Record<string, any>>('GET', `/courses/${id}`),
-  createSession: () => j<SessionView & { key?: string }>('POST', '/sessions', {}),
+  createSession: (stage?: string) => j<SessionView & { key?: string }>('POST', '/sessions', stage ? { stage } : {}),
   session: (id: string) => j<SessionView>('GET', `/sessions/${id}`),
   action: (id: string, action: string) => j<SessionView>('POST', `/sessions/${id}/actions`, { action }),
   cancel: (id: string, requestId?: string) => j<{ cancelled: boolean }>('POST', `/sessions/${id}/cancel`, { requestId }),

@@ -72,8 +72,15 @@ export function buildApp(cfg: Config, deps: Deps = {}) {
 
   app.get<{ Params: { id: string } }>(`${P}/courses/:id`, async (req, reply) => req.params.id === course.courseId ? publicCourse(course) : send(reply, 404, 'NOT_FOUND'))
 
-  app.post(`${P}/sessions`, async (_req, reply) => {
+  app.post<{ Body: { stage?: string } }>(`${P}/sessions`, async (req, reply) => {
     const s = store.create()
+    // 允许直接指定起始阶段：会话失效后重开时，学生不该被退回第一关（否则谈判记录全丢）。
+    // 只放行从 intro 能一步到达的阶段：explain（讲解）和 practice（谈判）。
+    const want = typeof req.body?.stage === 'string' ? req.body.stage : ''
+    if (want === 'explain' || want === 'practice') {
+      s.stage = want
+      if (want === 'practice') s.practice = { rounds: 0, parsed: {}, startedAt: new Date().toISOString() }
+    }
     reply.setCookie(COOKIE, s.owner, { httpOnly: true, sameSite: 'lax', path: cfg.basePath || '/', secure: cfg.cookieSecure, maxAge: cfg.limits.sessionTtlMs / 1000 })
     return { ...publicSession(s), key: s.owner }
   })
